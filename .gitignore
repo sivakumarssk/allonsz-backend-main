@@ -1,0 +1,31 @@
+# Node modules (if using Node.js)
+node_modules/
+
+# Composer dependencies (if using PHP Composer)
+vendor/
+
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+
+# Log files
+*.log
+
+# Cache
+cache/
+tmp/
+*.cache
+
+# XAMPP specific
+xamppfiles/
+htdocs/*.bak
+
+# PHPUnit
+phpunit.xml
+phpunit.result.cache
+
