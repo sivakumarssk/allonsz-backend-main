@@ -182,8 +182,6 @@ class TruthScreenController extends Controller
         $response = Http::withHeaders([
             'username' => $username,
             'Content-Type' => 'application/json',
-        ])->withOptions([
-    'verify' => false, // Disable SSL verification (DEVELOPMENT ONLY!)
 ])->post('https://www.truthscreen.com/api/v1.0/eaadhaardigilocker/', $payload);
 
         // Step 5: Handle the API response
