@@ -80,7 +80,7 @@
                     </td>
                     <td>
                       <a href="<?php echo e(url('show-customer',$user->id)); ?>" target="_blank"  class="btn btn-sm btn-warning"><i class="fa fa-eye"></i></a>
-                      <button class="btn btn-sm btn-primary" data-toggle="modal" data-target="#addModal" data-id="<?php echo e($user->id); ?>" data-first_name="<?php echo e($user->first_name); ?>" data-last_name="<?php echo e($user->last_name); ?>" data-email="<?php echo e($user->email); ?>" data-phone="<?php echo e($user->phone); ?>" data-gender="<?php echo e($user->gender); ?>" 
+                      <button class="btn btn-sm btn-primary"  data-toggle="modal" data-target="#addModal" data-id="<?php echo e($user->id); ?>" data-first_name="<?php echo e($user->first_name); ?>" data-last_name="<?php echo e($user->last_name); ?>" data-email="<?php echo e($user->email); ?>" data-phone="<?php echo e($user->phone); ?>" data-gender="<?php echo e($user->gender); ?>" 
                       data-country="<?php echo e($user->country_id); ?>" data-state="<?php echo e($user->state_id); ?>" data-district="<?php echo e($user->district_id); ?>" data-mandal="<?php echo e($user->mandal_id); ?>"><i class="fa fa-edit"></i></button>
                       <?php if($user->status == 'Pending'): ?>
                       <button class="btn btn-sm btn-danger" data-toggle="modal" data-target="#deleteModal" data-id="<?php echo e($user->id); ?>" data-action="permanent"><i class="fa fa-trash"></i></button>
@@ -287,6 +287,8 @@
       get_districts();
       get_mandals();
 
+      console.log('Modal opened', event.relatedTarget);
+      
       var button = $(event.relatedTarget);
       $('#edit-id').val(button.data('id'));
       $('#first_name').val(button.data('first_name'));
