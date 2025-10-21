@@ -597,4 +597,44 @@ class AdminController extends Controller
         return view('admin.partials.get_mandals',compact('mandals','customer'));
     }
 
+    // Get users with expiring timers (<=30 days or expired)
+    public function users_with_expiring_timers()
+    {
+        $users_with_expiring_timers = [];
+
+        // Get all users with active timers
+        $timers = Timer::with(['user', 'package'])->get();
+
+        foreach($timers as $timer){
+            if($timer->user){
+                $started_at = $timer->started_at;
+                $expires_at = $started_at->copy()->addDays(120); // 4 months = 120 days
+                $now = now();
+
+                // Calculate days remaining
+                $days_remaining = $now->diffInDays($expires_at, false);
+
+                // Check if timer has expired or has less than or equal to 30 days (1 month) remaining
+                if($days_remaining <= 30){
+                    $users_with_expiring_timers[] = [
+                        'timer' => $timer,
+                        'user' => $timer->user,
+                        'package' => $timer->package,
+                        'started_at' => $started_at,
+                        'expires_at' => $expires_at,
+                        'days_remaining' => max(0, ceil($days_remaining)), // Show 0 if expired
+                        'is_expired' => $days_remaining < 0
+                    ];
+                }
+            }
+        }
+
+        // Sort by days_remaining ascending (most urgent first)
+        usort($users_with_expiring_timers, function($a, $b) {
+            return $a['days_remaining'] <=> $b['days_remaining'];
+        });
+
+        return view('admin.expiring_timers',compact('users_with_expiring_timers'));
+    }
+
 }

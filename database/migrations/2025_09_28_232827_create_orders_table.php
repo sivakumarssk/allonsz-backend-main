@@ -12,9 +12,13 @@ class CreateOrdersTable extends Migration
             $table->id();
             $table->unsignedBigInteger('user_id');
             $table->unsignedBigInteger('package_id');
-            $table->string('order_number')->unique();
-            $table->decimal('amount', 10, 2);
-            $table->enum('status', ['pending', 'completed', 'failed', 'cancelled'])->default('pending');
+            $table->string('order_id')->nullable();
+            $table->string('payment_id')->nullable();
+            $table->string('order_number')->nullable()->unique();
+            $table->decimal('amount', 10, 2)->nullable();
+            $table->text('signature')->nullable();
+            $table->date('start_date')->nullable();
+            $table->enum('status', ['pending', 'Created', 'Verified', 'completed', 'failed', 'cancelled'])->default('pending');
             $table->string('payment_method')->nullable();
             $table->text('notes')->nullable();
             $table->timestamps();

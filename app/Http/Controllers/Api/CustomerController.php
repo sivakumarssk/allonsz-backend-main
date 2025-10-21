@@ -822,7 +822,7 @@ class CustomerController extends Controller
         foreach($circles as $circle){
             $timer = Timer::where('user_id',Auth::User()->id)->where('package_id',$circle->package_id)->first();
             $purchased_at = $timer->started_at;
-            $expiresAt = $purchased_at->copy()->addDays(60);
+            $expiresAt = $purchased_at->copy()->addDays(120); // Changed from 60 to 120 days (4 months)
             $circle['purchased_at'] = $expiresAt;
             foreach($circle->members as $member){
                 $color = Color::where('package_id',$circle->package_id)->where('position',$member->position)->first();
@@ -959,7 +959,7 @@ class CustomerController extends Controller
         $total =  $sgst + $cgst + $package->price;
 
         $orderData = [
-            'receipt'         => $item_number,
+            'receipt'         => strval($item_number),
             'amount'          => $total * 100, // 2000 rupees in paise
             'currency'        => 'INR',
             'payment_capture' => 1 // auto capture
@@ -1452,7 +1452,77 @@ class CustomerController extends Controller
         return response()->json([
             'adds' => $setting
         ],200);
-        
+
+    }
+
+    public function get_auto_renew_status()
+    {
+        $user = Auth::User();
+        return response()->json([
+            'auto_renew' => $user->auto_renew
+        ],200);
+    }
+
+    public function toggle_auto_renew(Request $request)
+    {
+        $rules = [
+            'auto_renew' => 'required|boolean',
+        ];
+
+        $validation = \Validator::make($request->all(), $rules);
+        $error = $validation->errors()->first();
+        if ($error) {
+            return response()->json([
+                'error' => $error
+            ], 422);
+        }
+
+        $user = Auth::User();
+        $user->auto_renew = $request->auto_renew;
+        $user->save();
+
+        return response()->json([
+            'msg' => 'Auto-renewal setting updated successfully',
+            'auto_renew' => $user->auto_renew
+        ],200);
+    }
+
+    // User API: Check if user's timer has less than 1 month remaining (returns alert status)
+    // Note: Expired timers are NOT shown to users, only shown in admin panel
+    public function check_timer_alert()
+    {
+        $user = Auth::User();
+        $timers_alert = [];
+
+        // Get all timers for the authenticated user
+        $timers = Timer::where('user_id', $user->id)->with('package')->get();
+
+        foreach($timers as $timer){
+            $started_at = $timer->started_at;
+            $expires_at = $started_at->copy()->addDays(120); // 4 months = 120 days
+            $now = now();
+
+            // Calculate days remaining
+            $days_remaining = $now->diffInDays($expires_at, false);
+
+            // Only show alert if timer has NOT expired and has 30 days or less remaining
+            // Expired timers are hidden from users as per requirement
+            if($days_remaining <= 30 && $days_remaining >= 0){
+                $timers_alert[] = [
+                    'package_id' => $timer->package_id,
+                    'package_name' => $timer->package ? $timer->package->name : 'N/A',
+                    'started_at' => $started_at->format('Y-m-d H:i:s'),
+                    'expires_at' => $expires_at->format('Y-m-d H:i:s'),
+                    'days_remaining' => ceil($days_remaining),
+                    'alert_message' => "Your travel package expires in " . ceil($days_remaining) . " day(s). Please complete your travel soon!"
+                ];
+            }
+        }
+
+        return response()->json([
+            'has_alert' => count($timers_alert) > 0,
+            'timers' => $timers_alert
+        ],200);
     }
     
     public function get_timer()
@@ -1468,7 +1538,7 @@ class CustomerController extends Controller
             $circle = $member->circle;
             $timer = Timer::where('user_id',Auth::User()->id)->where('package_id',$member->package_id)->first();
             $purchased_at = $timer->started_at;
-            $expiresAt = $purchased_at->copy()->addDays(60);
+            $expiresAt = $purchased_at->copy()->addDays(120); // Changed from 60 to 120 days (4 months)
             $member['purchased_at'] = $expiresAt;
 
             foreach($circle->members as $new_member){
@@ -2210,10 +2280,15 @@ class CustomerController extends Controller
                                 $timer = Timer::where('user_id',$circle->user_id)->where('package_id',$circle->package_id)->first();
                                 $timer->started_at = now();
                                 $timer->save();
-                                $circle->user->wallet = $circle->user->wallet + $package->reward_amount;
+                               // Add 10% bonus to reward amount
+                                $base_reward = $package->reward_amount;
+                                $bonus = ($base_reward * 10) / 100;
+                                $total_reward = $base_reward + $bonus;
+
+                                $circle->user->wallet = $circle->user->wallet + $total_reward;
                                 $circle->user->save();
-                                
-                                $this->create_transaction($circle->user_id, 'Credit', $package->reward_amount, $circle->user->wallet, '1st Section completed');
+
+                                $this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '1st Section completed (Base: ₹'.$base_reward.' + 10% Bonus: ₹'.$bonus.')');
                             }else{
                                 Log::info("reward not given due to downlines purchased count ".$purchsed_packages_count. " of ".$circle->user->username);
                             }
@@ -2290,10 +2365,15 @@ class CustomerController extends Controller
                                 $timer->started_at = now();
                                 $timer->save();
                                 
-                                $circle->user->wallet = $circle->user->wallet + $package->reward_amount;
-                                $circle->user->save();
-                                
-                                $this->create_transaction($circle->user_id, 'Credit', $package->reward_amount, $circle->user->wallet, '2nd Section completed');
+                                // Add 10% bonus to reward amount
+$base_reward = $package->reward_amount;
+$bonus = ($base_reward * 10) / 100;
+$total_reward = $base_reward + $bonus;
+
+$circle->user->wallet = $circle->user->wallet + $total_reward;
+$circle->user->save();
+
+$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '2nd Section completed (Base: ₹'.$base_reward.' + 10% Bonus: ₹'.$bonus.')');
                             }else{
                                 Log::info("reward not given due to downlines purchased count ".$purchsed_packages_count. " of ".$circle->user->username);
                             }
@@ -2380,10 +2460,15 @@ class CustomerController extends Controller
                                 $timer->started_at = now();
                                 $timer->save();
                                 
-                                $circle->user->wallet = $circle->user->wallet + $package->reward_amount;
-                                $circle->user->save();
-                                
-                                $this->create_transaction($circle->user_id, 'Credit', $package->reward_amount, $circle->user->wallet, '1st Section completed');
+                                // Add 10% bonus to reward amount
+$base_reward = $package->reward_amount;
+$bonus = ($base_reward * 10) / 100;
+$total_reward = $base_reward + $bonus;
+
+$circle->user->wallet = $circle->user->wallet + $total_reward;
+$circle->user->save();
+
+$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '1st Section completed (Base: ₹'.$base_reward.' + 10% Bonus: ₹'.$bonus.')');
                             }else{
                                 // Log::info("reward not given due to downlines purchased count ".$purchsed_packages_count. " of ".$circle->user->username);
                             }
@@ -2467,10 +2552,15 @@ class CustomerController extends Controller
                                 $timer->started_at = now();
                                 $timer->save();
                                 
-                                $circle->user->wallet = $circle->user->wallet + $package->reward_amount;
-                                $circle->user->save();
-                                
-                                $this->create_transaction($circle->user_id, 'Credit', $package->reward_amount, $circle->user->wallet, '2nd Section completed');
+                                // Add 10% bonus to reward amount
+$base_reward = $package->reward_amount;
+$bonus = ($base_reward * 10) / 100;
+$total_reward = $base_reward + $bonus;
+
+$circle->user->wallet = $circle->user->wallet + $total_reward;
+$circle->user->save();
+
+$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '2nd Section completed (Base: ₹'.$base_reward.' + 10% Bonus: ₹'.$bonus.')');
                             }else{
                                 // Log::info("reward not given due to downlines purchased count ".$purchsed_packages_count. " of ".$circle->user->username);
                             }
@@ -2555,10 +2645,15 @@ class CustomerController extends Controller
                                 $timer->started_at = now();
                                 $timer->save();
                                 
-                                $circle->user->wallet = $circle->user->wallet + $package->reward_amount;
-                                $circle->user->save();
-                                
-                                $this->create_transaction($circle->user_id, 'Credit', $package->reward_amount, $circle->user->wallet, '3rd Section completed');
+                                // Add 10% bonus to reward amount
+$base_reward = $package->reward_amount;
+$bonus = ($base_reward * 10) / 100;
+$total_reward = $base_reward + $bonus;
+
+$circle->user->wallet = $circle->user->wallet + $total_reward;
+$circle->user->save();
+
+$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '3rd Section completed (Base: ₹'.$base_reward.' + 10% Bonus: ₹'.$bonus.')');
                             }else{
                                 // Log::info("reward not given due to downlines purchased count ".$purchsed_packages_count. " of ".$circle->user->username);
                             }
@@ -2651,10 +2746,15 @@ class CustomerController extends Controller
                                 $timer->started_at = now();
                                 $timer->save();
                                 
-                                $circle->user->wallet = $circle->user->wallet + $package->reward_amount;
-                                $circle->user->save();
-                                
-                                $this->create_transaction($circle->user_id, 'Credit', $package->reward_amount, $circle->user->wallet, '1st Section completed');
+                                // Add 10% bonus to reward amount
+$base_reward = $package->reward_amount;
+$bonus = ($base_reward * 10) / 100;
+$total_reward = $base_reward + $bonus;
+
+$circle->user->wallet = $circle->user->wallet + $total_reward;
+$circle->user->save();
+
+$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '1st Section completed (Base: ₹'.$base_reward.' + 10% Bonus: ₹'.$bonus.')');
                             }else{
                                 // Log::info("reward not given due to downlines purchased count ".$purchsed_packages_count. " of ".$circle->user->username);
                             }
@@ -2743,10 +2843,15 @@ class CustomerController extends Controller
                                 $timer->started_at = now();
                                 $timer->save();
 
-                                $circle->user->wallet = $circle->user->wallet + $package->reward_amount;
-                                $circle->user->save();
-                                
-                                $this->create_transaction($circle->user_id, 'Credit', $package->reward_amount, $circle->user->wallet, '2nd Section completed');
+                                // Add 10% bonus to reward amount
+$base_reward = $package->reward_amount;
+$bonus = ($base_reward * 10) / 100;
+$total_reward = $base_reward + $bonus;
+
+$circle->user->wallet = $circle->user->wallet + $total_reward;
+$circle->user->save();
+
+$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '2nd Section completed (Base: ₹'.$base_reward.' + 10% Bonus: ₹'.$bonus.')');
                             }else{
                                 // Log::info("reward not given due to downlines purchased count ".$purchsed_packages_count. " of ".$circle->user->username);
                             }
@@ -2836,10 +2941,15 @@ class CustomerController extends Controller
                                 $timer->started_at = now();
                                 $timer->save();
                                 
-                                $circle->user->wallet = $circle->user->wallet + $package->reward_amount;
-                                $circle->user->save();
-                                
-                                $this->create_transaction($circle->user_id, 'Credit', $package->reward_amount, $circle->user->wallet, '3rd Section completed');
+                                // Add 10% bonus to reward amount
+$base_reward = $package->reward_amount;
+$bonus = ($base_reward * 10) / 100;
+$total_reward = $base_reward + $bonus;
+
+$circle->user->wallet = $circle->user->wallet + $total_reward;
+$circle->user->save();
+
+$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '3rd Section completed (Base: ₹'.$base_reward.' + 10% Bonus: ₹'.$bonus.')');
                             }else{
                                 // Log::info("reward not given due to downlines purchased count ".$purchsed_packages_count. " of ".$circle->user->username);
                             }
@@ -2929,10 +3039,15 @@ class CustomerController extends Controller
                                 $timer->started_at = now();
                                 $timer->save();
                                 
-                                $circle->user->wallet = $circle->user->wallet + $package->reward_amount;
-                                $circle->user->save();
-                                
-                                $this->create_transaction($circle->user_id, 'Credit', $package->reward_amount, $circle->user->wallet, '4th Section completed');
+                                // Add 10% bonus to reward amount
+$base_reward = $package->reward_amount;
+$bonus = ($base_reward * 10) / 100;
+$total_reward = $base_reward + $bonus;
+
+$circle->user->wallet = $circle->user->wallet + $total_reward;
+$circle->user->save();
+
+$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '4th Section completed (Base: ₹'.$base_reward.' + 10% Bonus: ₹'.$bonus.')');
                             }else{
                                 // Log::info("reward not given due to downlines purchased count ".$purchsed_packages_count. " of ".$circle->user->username);
                             }
@@ -2971,7 +3086,7 @@ class CustomerController extends Controller
                     $circle->user->wallet = $circle->user->wallet - $package->reward_amount;
                     $circle->user->save();
                     $this->create_transaction($circle->user_id, 'Debit', $package->reward_amount, $circle->user->wallet, $package->name.' Package Purchased');
-                    
+
                     Log::info("check for uplines after circle complete");
 
                     // Check upline circle
@@ -2981,28 +3096,28 @@ class CustomerController extends Controller
                         $this->fill_directly($upline_circle->id,$package_id,$circle->user_id);
                         return;
                     }
-                    
+
                     Log::info("check for downlines after circle complete");
 
-                    
+
                     // Check downlines
                     foreach ($circle->user->downlines as $downline) {
                         Log::info($circle->user->username . " goes to downline - " . $downline->username . " circle after completing");
-                    
+
                         $downline_circle = Circle::with('package')->where('package_id', $package->id)
                             ->where('user_id', $downline->id)
                             ->where('status', 'Active')
                             ->first();
-                    
+
                         if ($downline_circle) {
                             Log::info("downline circle found -" . $downline->username);
                             $this->fill_directly($downline_circle->id,$package_id,$circle->user_id);
                             return true;
                         }
                     }
-                    
+
                     Log::info("check for upline -> downlines after circle complete");
-                    
+
                     // Check upline -> downlines circles
                     $upline = $circle->user->referal;
                     if ($upline) {
@@ -3011,7 +3126,7 @@ class CustomerController extends Controller
                                 ->where('user_id', $downline->id)
                                 ->where('status', 'Active')
                                 ->first();
-                    
+
                             if ($downline_circle) {
                                 Log::info("circle found -" . $downline->username);
                                 $this->fill_directly($downline_circle->id,$package_id,$circle->user_id);
@@ -3020,7 +3135,7 @@ class CustomerController extends Controller
                         }
                     }
                 }
-                
+
     }
     
     private function findUplineCircle($user, $package_id)

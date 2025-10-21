@@ -14,10 +14,10 @@ class Kernel extends ConsoleKernel
 
     protected function schedule(Schedule $schedule)
     {
-        $schedule->command('booking:start')->everyTenMinutes()->evenInMaintenanceMode();
-        $schedule->command('booking:end')->everyMinute()->evenInMaintenanceMode();
-        $schedule->command('pending:deposit')->daily()->evenInMaintenanceMode();
-        $schedule->command('coupon:expire')->daily()->evenInMaintenanceMode();
+        // $schedule->command('booking:start')->everyTenMinutes()->evenInMaintenanceMode();
+        // $schedule->command('booking:end')->everyMinute()->evenInMaintenanceMode();
+        // $schedule->command('pending:deposit')->daily()->evenInMaintenanceMode();
+        // $schedule->command('coupon:expire')->daily()->evenInMaintenanceMode();
     }
 
     protected function commands()

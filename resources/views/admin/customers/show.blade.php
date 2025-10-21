@@ -513,7 +513,7 @@
 
                                         $purchased_at = $timer->started_at;
 
-                                        $expiresAt = $purchased_at->copy()->addDays(60);
+                                        $expiresAt = $purchased_at->copy()->addDays(120);
                                         $now = now();
 
                                         if ($now->gt($expiresAt)) {

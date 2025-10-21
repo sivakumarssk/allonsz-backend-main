@@ -12,7 +12,7 @@ class CreateSubscriptionsTable extends Migration
             $table->id();
             $table->unsignedBigInteger('user_id');
             $table->unsignedBigInteger('package_id');
-            $table->date('start_date');
+            $table->date('start_date')->nullable();
             $table->date('end_date')->nullable();
             $table->enum('status', ['active', 'expired', 'cancelled'])->default('active');
             $table->timestamps();

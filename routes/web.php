@@ -34,7 +34,7 @@ Route::get('/healthcheck', function () {
     return response('OK', 200);
 });
 
-Route::get('/privacy_policy',[AdminController::class, 'privacy_policy']);
+Route::get('/privacypolicy',[AdminController::class, 'privacy_policy']);
 
 Route::middleware('guest')->group(function () {
 
@@ -66,6 +66,7 @@ Route::middleware('admin')->group(function () {
 	Route::post('/update-user-status',[AdminController::class, 'update_user_status']);
 	Route::post('/update-document-status',[AdminController::class, 'update_document_status']);
     Route::get('/customer-timers',[AdminController::class, 'customer_timers']);
+    Route::get('/expiring-timers',[AdminController::class, 'users_with_expiring_timers']);
 	Route::get('/withdraws',[AdminController::class, 'withdraws']);
 	Route::post('/update-withdraw',[AdminController::class, 'update_withdraw']);
     Route::get('clear-purchase-history/{id}', [AdminController::class,'clear_purchase_history']);

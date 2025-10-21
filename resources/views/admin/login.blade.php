@@ -88,9 +88,6 @@
                                 </div>
                                 <p class="mt-5"><center><small>© Copyright <a href="https://allons-z.com/" target="_blank">Allons-z</a></small></center></p>
                                 <p>
-                                    <center>
-                                        <small>Designed by <a href="https://analogueitsolutions.com/" target="_blank">Analogue IT Solutions</a></small> &nbsp;Pvt Ltd
-                                    </center>
                                 </p>
                             </div>
                         </form>

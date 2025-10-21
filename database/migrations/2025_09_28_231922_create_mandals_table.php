@@ -12,7 +12,7 @@ class CreateMandalsTable extends Migration
             $table->id();
             $table->string('name');
             $table->unsignedBigInteger('district_id');
-            $table->unsignedBigInteger('state_id');
+            $table->unsignedBigInteger('state_id')->nullable();
             $table->softDeletes();
             $table->timestamps();
             

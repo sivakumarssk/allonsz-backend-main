@@ -214,6 +214,12 @@
             </a>
           </li>
           <li class="nav-item">
+            <a href="{{url('expiring-timers')}}" class="nav-link {{ request()->is('expiring-timers*') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-duotone fa-user"></i>
+              <p>Expiring Timers</p>
+            </a>
+          </li>
+          <li class="nav-item">
             <a href="{{url('customer-timers')}}" class="nav-link {{ request()->is('customer-timers*') ? 'active' : '' }}">
               <i class="nav-icon fas fa-duotone fa-user"></i>
               <p>Timers</p>
@@ -379,7 +385,6 @@
     <div class="float-right d-none d-sm-block">
       <b>Version</b> 1.0
     </div>
-    <strong>Copyright &copy; 2014-2022 <a href="https://analogueitsolutions.com/" target="_blank">Analogue IT Solutions</a>.</strong> All rights reserved.
   </footer>
 
   <!-- Control Sidebar -->
