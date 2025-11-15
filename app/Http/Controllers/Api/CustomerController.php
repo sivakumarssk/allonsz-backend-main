@@ -62,7 +62,7 @@ class CustomerController extends Controller
     public function user_status()
     {
         $user = Auth::User();
-        
+
         return response()->json([
             'profile_status' => $user->profile_status,
             'document_status' => $user->document_status,
@@ -70,7 +70,7 @@ class CustomerController extends Controller
             'pan_status' => $user->pan_status,
             'bank_status' => $user->bank_status,
             'status' => $user->status,
-        ],200); 
+        ],200);
     }
     
     public function send_otp(Request $request)
@@ -416,7 +416,7 @@ class CustomerController extends Controller
                 'error' => 'Invalid email or OTP.'
         ],422);
     }
-    
+
     public function update_password(Request $request)
     {
         $rules = [
@@ -544,6 +544,14 @@ class CustomerController extends Controller
         //return $request->all();
         if($request->hasFile('photo')) {
             $file= $request->file('photo');
+            
+            // Validate that we have a valid file object
+            if (!$file || !$file->isValid()) {
+                return response()->json([
+                    'error' => 'Invalid file uploaded'
+                ], 422);
+            }
+            
             $allowedfileExtension=['JPEG','jpeg','jpg','png'];
             $extension = $file->getClientOriginalExtension();
             $check = in_array($extension,$allowedfileExtension);
@@ -614,10 +622,19 @@ class CustomerController extends Controller
         //return $request->all();
         if($request->hasFile('photo')) {
             $file= $request->file('photo');
+            
+            // Validate that we have a valid file object
+            if (!$file || !$file->isValid()) {
+                return response()->json([
+                    'error' => 'Invalid file uploaded'
+                ], 422);
+            }
+            
             $allowedfileExtension=['JPEG','jpeg','jpg','png'];
             $extension = $file->getClientOriginalExtension();
             $check = in_array($extension,$allowedfileExtension);
-            // if($check){
+            
+            if($check){
                 $oldFilePath = public_path('/images/profiles/'.$user->photo_filename);
                 if (file_exists($oldFilePath) && $user->photo_filename != '') {
                     unlink($oldFilePath);
@@ -626,11 +643,11 @@ class CustomerController extends Controller
                 $filename = substr(str_shuffle(str_repeat($pool, 5)), 0, 12) .'.'.$extension;
                 $path = $file->move(public_path('/images/profiles'), $filename);
                 $user->photo = $filename;
-            // }else{
-            //     return response()->json([
-            //         'error' => 'Invalid file format, please upload valid image file'
-            //     ], 422);
-            // }
+            }else{
+                return response()->json([
+                    'error' => 'Invalid file format, please upload valid image file'
+                ], 422);
+            }
         }
         $user->save();
     
@@ -1053,7 +1070,7 @@ class CustomerController extends Controller
                 'razorpay_signature' => $razorpay_signature
             );
             // if(!$request->type){
-                $this->api->utility->verifyPaymentSignature($attributes);
+            $this->api->utility->verifyPaymentSignature($attributes);
             // }
             
         }
@@ -1363,6 +1380,13 @@ class CustomerController extends Controller
     
         if ($request->hasFile('photos')) {
             foreach ($request->file('photos') as $file) {
+                // Validate that we have a valid file object
+                if (!$file || !$file->isValid()) {
+                    return response()->json([
+                        'error' => 'One or more invalid files uploaded'
+                    ], 422);
+                }
+                
                 $extension = $file->getClientOriginalExtension();
                 $filename = uniqid('trip_', true) . '.' . $extension;
     
@@ -1455,38 +1479,6 @@ class CustomerController extends Controller
 
     }
 
-    public function get_auto_renew_status()
-    {
-        $user = Auth::User();
-        return response()->json([
-            'auto_renew' => $user->auto_renew
-        ],200);
-    }
-
-    public function toggle_auto_renew(Request $request)
-    {
-        $rules = [
-            'auto_renew' => 'required|boolean',
-        ];
-
-        $validation = \Validator::make($request->all(), $rules);
-        $error = $validation->errors()->first();
-        if ($error) {
-            return response()->json([
-                'error' => $error
-            ], 422);
-        }
-
-        $user = Auth::User();
-        $user->auto_renew = $request->auto_renew;
-        $user->save();
-
-        return response()->json([
-            'msg' => 'Auto-renewal setting updated successfully',
-            'auto_renew' => $user->auto_renew
-        ],200);
-    }
-
     // User API: Check if user's timer has less than 1 month remaining (returns alert status)
     // Note: Expired timers are NOT shown to users, only shown in admin panel
     public function check_timer_alert()
@@ -1514,13 +1506,34 @@ class CustomerController extends Controller
                     'started_at' => $started_at->format('Y-m-d H:i:s'),
                     'expires_at' => $expires_at->format('Y-m-d H:i:s'),
                     'days_remaining' => ceil($days_remaining),
-                    'alert_message' => "Your travel package expires in " . ceil($days_remaining) . " day(s). Please complete your travel soon!"
+                    'alert_message' => "Your" .$timer->package ? $timer->package->name : '' . "package expires in " . ceil($days_remaining) . " day(s). Please complete your travel soon!"
                 ];
             }
         }
 
+        // $timers_alert = [ 
+        //     // Sample data for testing
+        //     [
+        //         'package_id' => 1,
+        //         'package_name' => 'Silver Package',
+        //         'started_at' => '2024-03-01 10:00:00',
+        //         'expires_at' => '2024-06-29 10:00:00',
+        //         'days_remaining' => 15,
+        //         'alert_message' => 'Your Silver Package expires in 15 day(s). Please complete your travel soon!'
+        //     ],
+        //     [
+        //         'package_id' => 2,
+        //         'package_name' => 'Gold Package',
+        //         'started_at' => '2024-02-15 12:00:00',
+        //         'expires_at' => '2024-06-14 12:00:00',
+        //         'days_remaining' => 5,
+        //         'alert_message' => 'Your Gold Package expires in 5 day(s). Please complete your travel soon!'
+        //     ]
+        // ];
+
         return response()->json([
             'has_alert' => count($timers_alert) > 0,
+            // 'has_alert' => true,
             'timers' => $timers_alert
         ],200);
     }
@@ -2208,852 +2221,333 @@ class CustomerController extends Controller
                 $twenty_one_position = Member::where('circle_id', $circle->id)->where('position', 21)->first();
         
         if($jump_position == 7){
-                    if($first_position->status == 'Occupied' && $second_position->status == 'Occupied' && $third_position->status == 'Occupied' && $seven_position->status == 'Occupied'){
-                        $new_circle = Circle::where('user_id',$third_position->user_id)->where('package_id',$package->id)->where('status','Active')->first();
-                        if(!$new_circle){
-                            Log::info("creating new circle for ".$third_position->user->username);
-                            $new_circle = new Circle();
-                            $new_circle->user_id = $third_position->user_id;
-                            $new_circle->name = $this->generateUniqueString(8);
-                            $new_circle->package_id = $package->id;
-                            $new_circle->reward_amount = 0;
-                            $new_circle->status = 'Active';
-                            $new_circle->save();
-                            
-                            for ($i = 1; $i <= $package->total_members; $i++){
-                                $member = new Member();
-                                $member->circle_id = $new_circle->id;
-                                $member->position = $i;
-                                if($i == 3){
-                                    $member->user_id = $first_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                if($i == 6){
-                                    $member->user_id = $second_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                if($i == 7){
-                                    $member->user_id = $third_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                $member->package_id = $package->id;
-                                $member->save();
-                            }
-                            
-                        }
+                    // Evaluate sections independently: blocks [1-2], [4-5]
+                    // Position 7 user gets reward when any block completes
+                    $positionsMap = [
+                        1 => $first_position, 2 => $second_position, 3 => $third_position,
+                        4 => $fourth_position, 5 => $fifth_position, 6 => $six_position, 7 => $seven_position,
+                    ];
+
+                    // Map: section => block_positions (layer-2 position must also be occupied)
+                    $sectionConfig = [
+                        1 => ['block' => [1,2], 'layer2_pos' => 3],
+                        2 => ['block' => [4,5], 'layer2_pos' => 6],
+                    ];
+
+                    // Check if position 7 is occupied (required for sections to complete)
+                    if($positionsMap[7]->status == 'Occupied'){
+                        // Reward goes to circle OWNER, not the person at position 7
+                        $mainOwner = $circle->user;
+                        if($mainOwner){
+
+                    foreach ($sectionConfig as $sectionNum => $config) {
+                        $blockPositions = $config['block'];
+                        $layer2Pos = $config['layer2_pos'];
                         
-                        // check if already given reward
-                        Log::info("checking for reward - jump position 7");
-                        $circle_reward = CircleReward::where('circle_id',$circle->id)->where('section',1)->first();
-                        if(!$circle_reward){
-                            Log::info("no reward given to ".$circle->user->username);
-                            $downlines = $circle->user->downlines;
-                            $purchsed_packages_count = 0;
-                            foreach($downlines as $downline){
-                                $downline_circle = Subscription::where('package_id',$package->id)->where('user_id',$downline->id)->first();
-                                if($downline_circle){
-                                    $purchsed_packages_count = $purchsed_packages_count + 1;
-                                }
-                                if($purchsed_packages_count >= 2){
-                                    break;
-                                }
-                            }
-                            
-                            if($purchsed_packages_count >= 2){
-                                // add reward to referal
-                                Log::info("creating trip for");
-                                $trip = new Trip();
-                                $trip->user_id = $circle->user_id;
-                                $trip->save();
-                                
-                                Log::info("creating reward ".$circle->user->username);
-                                $circle_reward = new CircleReward();
-                                $circle_reward->user_id = $circle->user_id;
-                                $circle_reward->circle_id = $circle->id;
-                                $circle_reward->trip_id = $trip->id;
-                                $circle_reward->amount = $package->reward_amount;
-                                $circle_reward->section = 1;
-                                $circle_reward->desc = '1st Section completed';
-                                $circle_reward->status = 'Success';
-                                $circle_reward->save();
-                                
-                                $timer = Timer::where('user_id',$circle->user_id)->where('package_id',$circle->package_id)->first();
-                                $timer->started_at = now();
-                                $timer->save();
-                               // Add 10% bonus to reward amount
-                                $base_reward = $package->reward_amount;
-                                $bonus = ($base_reward * 10) / 100;
-                                $total_reward = $base_reward + $bonus;
+                        // Check if layer-2 position is occupied
+                        if(!isset($positionsMap[$layer2Pos]) || $positionsMap[$layer2Pos]->status != 'Occupied'){
+                            continue;
+                        }
 
-                                $circle->user->wallet = $circle->user->wallet + $total_reward;
-                                $circle->user->save();
-
-                                $this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '1st Section completed (Base: ₹'.$base_reward.' + 10% Bonus: ₹'.$bonus.')');
-                            }else{
-                                Log::info("reward not given due to downlines purchased count ".$purchsed_packages_count. " of ".$circle->user->username);
+                        // Check if all 2 positions in this block are occupied
+                        $allOccupied = true;
+                        foreach ($blockPositions as $pos) {
+                            if(!isset($positionsMap[$pos]) || $positionsMap[$pos]->status != 'Occupied'){
+                                $allOccupied = false; break;
                             }
                         }
+                        if(!$allOccupied){
+                            continue;
+                        }
+
+                        // Skip if this section already rewarded
+                        $existing = CircleReward::where('circle_id',$circle->id)
+                                                 ->where('user_id', $mainOwner->id)
+                                                 ->where('section',$sectionNum)
+                                                 ->first();
+                        if($existing){
+                            continue;
+                        }
+
+                        // Check main owner's direct downlines who purchased this package (gate: >=2)
+                        $ownerDownlines = $mainOwner->downlines;
+                        $ownerPurchasedCount = 0;
+                        foreach($ownerDownlines as $downline){
+                            $downline_sub = Subscription::where('package_id',$package->id)->where('user_id',$downline->id)->first();
+                            if($downline_sub){
+                                $ownerPurchasedCount = $ownerPurchasedCount + 1;
+                            }
+                            if($ownerPurchasedCount >= 2){
+                                break;
+                            }
+                        }
+
+                        if($ownerPurchasedCount < 2){
+                            Log::info("Section $sectionNum not rewarded: position 7 user ".$mainOwner->username." has only $ownerPurchasedCount downline purchases (need 2)");
+                            continue;
+                        }
+
+                        // Create Trip and Reward for this section
+                        $trip = new Trip();
+                        $trip->user_id = $mainOwner->id;
+                        $trip->save();
+
+                        $suffixes = [1 => '1st', 2 => '2nd'];
+                        $label = isset($suffixes[$sectionNum]) ? $suffixes[$sectionNum] : ($sectionNum.'th');
+
+                        $newReward = new CircleReward();
+                        $newReward->user_id = $mainOwner->id;
+                        $newReward->circle_id = $circle->id;
+                        $newReward->trip_id = $trip->id;
+                        $newReward->amount = $package->reward_amount;
+                        $newReward->section = $sectionNum;
+                        $newReward->desc = $label.' Section completed';
+                        $newReward->status = 'Success';
+                        $newReward->save();
+
+                        $timer = Timer::where('user_id',$mainOwner->id)->where('package_id',$circle->package_id)->first();
+                        if($timer){
+                            $timer->started_at = now();
+                            $timer->save();
+                        }
+
+                        // Credit with 10% bonus
+                        $base_reward = $package->reward_amount;
+                        $bonus = ($base_reward * 10) / 100;
+                        $total_reward = $base_reward + $bonus;
+
+                        $mainOwner->wallet = $mainOwner->wallet + $total_reward;
+                        $mainOwner->save();
+
+                        $this->create_transaction($mainOwner->id, 'Credit', $total_reward, $mainOwner->wallet, $label.' Section completed (Base: ₹'.$base_reward.' + 10% Bonus: ₹'.$bonus.')');
+                        
+                        Log::info("Section $sectionNum completed: credited ₹$total_reward to position 7 user ".$mainOwner->username);
                     }
-                    if($fourth_position->status == 'Occupied' && $fifth_position->status == 'Occupied' && $six_position->status == 'Occupied' && $seven_position->status == 'Occupied'){
-                        $new_circle = Circle::where('user_id',$six_position->user_id)->where('package_id',$package->id)->where('status','Active')->first();
-                        if(!$new_circle){
-                                Log::info("creating new circle for ".$six_position->user->username);
-                            $new_circle = new Circle();
-                            $new_circle->user_id = $six_position->user_id;
-                            $new_circle->name = $this->generateUniqueString(8);
-                            $new_circle->package_id = $package->id;
-                            $new_circle->reward_amount = 0;
-                            $new_circle->status = 'Active';
-                            $new_circle->save();
-                            for ($i = 1; $i <= $package->total_members; $i++){
-                                $member = new Member();
-                                $member->circle_id = $new_circle->id;
-                                $member->position = $i;
-                                if($i == 3){
-                                    $member->user_id = $fifth_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                if($i == 6){
-                                    $member->user_id = $fourth_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                if($i == 7){
-                                    $member->user_id = $six_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                $member->package_id = $package->id;
-                                $member->save();
-                            }
-                            
-                        }
-                        
-                        // check if already given reward
-                        $circle_reward = CircleReward::where('circle_id',$circle->id)->where('section',2)->first();
-                        if(!$circle_reward){
-                                Log::info("no reward given to ".$circle->user->username);
-                            $downlines = $circle->user->downlines;
-                            $purchsed_packages_count = 0;
-                            foreach($downlines as $downline){
-                                $downline_circle = Subscription::where('package_id',$package->id)->where('user_id',$downline->id)->first();
-                                if($downline_circle){
-                                    $purchsed_packages_count = $purchsed_packages_count + 1;
-                                }
-                                if($purchsed_packages_count >= 2){
-                                    break;
-                                }
-                            }
-                            
-                            if($purchsed_packages_count >= 2){
-                                // add reward to referal
-                                    Log::info("creating trip for");
-                                $trip = new Trip();
-                                $trip->user_id = $circle->user_id;
-                                $trip->save();
-                                
-                                    Log::info("creating reward ".$circle->user->username);
-                                $circle_reward = new CircleReward();
-                                $circle_reward->user_id = $circle->user_id;
-                                $circle_reward->circle_id = $circle->id;
-                                $circle_reward->trip_id = $trip->id;
-                                $circle_reward->amount = $package->reward_amount;
-                                $circle_reward->section = 2;
-                                $circle_reward->desc = '2nd Section completed';
-                                $circle_reward->status = 'Success';
-                                $circle_reward->save();
-
-                                $timer = Timer::where('user_id',$circle->user_id)->where('package_id',$circle->package_id)->first();
-                                $timer->started_at = now();
-                                $timer->save();
-                                
-                                // Add 10% bonus to reward amount
-$base_reward = $package->reward_amount;
-$bonus = ($base_reward * 10) / 100;
-$total_reward = $base_reward + $bonus;
-
-$circle->user->wallet = $circle->user->wallet + $total_reward;
-$circle->user->save();
-
-$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '2nd Section completed (Base: ₹'.$base_reward.' + 10% Bonus: ₹'.$bonus.')');
-                            }else{
-                                Log::info("reward not given due to downlines purchased count ".$purchsed_packages_count. " of ".$circle->user->username);
-                            }
                         }
                     }
                 }
                     
         if($jump_position == 13){
-                    // Log::info("checking for jump position 13");
-                    if($first_position->status == 'Occupied' && $second_position->status == 'Occupied' && $third_position->status == 'Occupied' && $fourth_position->status == 'Occupied' && $thirteen_position->status == 'Occupied'){
-                        $new_circle = Circle::where('user_id',$fourth_position->user_id)->where('status','Active')->where('package_id',$package->id)->first();
-                        if(!$new_circle){
-                            // Log::info("creating new circle for ".$fourth_position->user->username);
-                            $new_circle = new Circle();
-                            $new_circle->user_id = $fourth_position->user_id;
-                            $new_circle->name = $this->generateUniqueString(8);
-                            $new_circle->package_id = $package->id;
-                            $new_circle->reward_amount = 0;
-                            $new_circle->status = 'Active';
-                            $new_circle->save();
-                            
-                            for ($i = 1; $i <= $package->total_members; $i++){
-                                $member = new Member();
-                                $member->circle_id = $new_circle->id;
-                                $member->position = $i;
-                                if($i == 4){
-                                    $member->user_id = $first_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                if($i == 8){
-                                    $member->user_id = $second_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                if($i == 12){
-                                    $member->user_id = $third_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                if($i == 13){
-                                    $member->user_id = $fourth_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                $member->package_id = $package->id;
-                                $member->save();
-                            }
-                            
-                        }
+                    // Evaluate sections independently: blocks [1-3], [5-7], [9-11]
+                    // Position 13 user gets reward when any block completes
+                    $positionsMap = [
+                        1 => $first_position, 2 => $second_position, 3 => $third_position, 4 => $fourth_position,
+                        5 => $fifth_position, 6 => $six_position, 7 => $seven_position, 8 => $eight_position,
+                        9 => $nine_position, 10 => $ten_position, 11 => $eleven_position, 12 => $twelve_position,
+                        13 => $thirteen_position,
+                    ];
+
+                    // Map: section => block_positions (layer-2 position must also be occupied)
+                    $sectionConfig = [
+                        1 => ['block' => [1,2,3], 'layer2_pos' => 4],
+                        2 => ['block' => [5,6,7], 'layer2_pos' => 8],
+                        3 => ['block' => [9,10,11], 'layer2_pos' => 12],
+                    ];
+
+                    // Check if position 13 is occupied (required for sections to complete)
+                    if($positionsMap[13]->status == 'Occupied'){
+                        // Reward goes to circle OWNER, not the person at position 13
+                        $mainOwner = $circle->user;
+                        if($mainOwner){
+
+                    foreach ($sectionConfig as $sectionNum => $config) {
+                        $blockPositions = $config['block'];
+                        $layer2Pos = $config['layer2_pos'];
                         
-                        // check if already given reward
-                        // Log::info("checking for reward - jump position 13");
-                        $circle_reward = CircleReward::where('circle_id',$circle->id)->where('section',1)->first();
-                        if(!$circle_reward){
-                            // Log::info("no reward given to ".$circle->user->username);
-                            $downlines = $circle->user->downlines;
-                            $purchsed_packages_count = 0;
-                            foreach($downlines as $downline){
-                                $downline_circle = Subscription::where('package_id',$package->id)->where('user_id',$downline->id)->first();
-                                if($downline_circle){
-                                    $purchsed_packages_count = $purchsed_packages_count + 1;
-                                }
-                                if($purchsed_packages_count >= 3){
-                                    break;
-                                }
-                            }
-                            
-                            if($purchsed_packages_count >= 3){
-                                // add reward to referal
-                                // Log::info("creating trip for");
-                                $trip = new Trip();
-                                $trip->user_id = $circle->user_id;
-                                $trip->save();
-                                
-                                // Log::info("creating reward ".$circle->user->username);
-                                $circle_reward = new CircleReward();
-                                $circle_reward->user_id = $circle->user_id;
-                                $circle_reward->circle_id = $circle->id;
-                                $circle_reward->trip_id = $trip->id;
-                                $circle_reward->amount = $package->reward_amount;
-                                $circle_reward->section = 1;
-                                $circle_reward->desc = '1st Section completed';
-                                $circle_reward->status = 'Success';
-                                $circle_reward->save();
+                        // Check if layer-2 position is occupied
+                        if(!isset($positionsMap[$layer2Pos]) || $positionsMap[$layer2Pos]->status != 'Occupied'){
+                            continue;
+                        }
 
-                                $timer = Timer::where('user_id',$circle->user_id)->where('package_id',$circle->package_id)->first();
-                                $timer->started_at = now();
-                                $timer->save();
-                                
-                                // Add 10% bonus to reward amount
-$base_reward = $package->reward_amount;
-$bonus = ($base_reward * 10) / 100;
-$total_reward = $base_reward + $bonus;
-
-$circle->user->wallet = $circle->user->wallet + $total_reward;
-$circle->user->save();
-
-$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '1st Section completed (Base: ₹'.$base_reward.' + 10% Bonus: ₹'.$bonus.')');
-                            }else{
-                                // Log::info("reward not given due to downlines purchased count ".$purchsed_packages_count. " of ".$circle->user->username);
+                        // Check if all 3 positions in this block are occupied
+                        $allOccupied = true;
+                        foreach ($blockPositions as $pos) {
+                            if(!isset($positionsMap[$pos]) || $positionsMap[$pos]->status != 'Occupied'){
+                                $allOccupied = false; break;
                             }
                         }
+                        if(!$allOccupied){
+                            continue;
+                        }
+
+                        // Skip if this section already rewarded
+                        $existing = CircleReward::where('circle_id',$circle->id)
+                                                 ->where('user_id', $mainOwner->id)
+                                                 ->where('section',$sectionNum)
+                                                 ->first();
+                        if($existing){
+                            continue;
+                        }
+
+                        // Check main owner's direct downlines who purchased this package (gate: >=2)
+                        $ownerDownlines = $mainOwner->downlines;
+                        $ownerPurchasedCount = 0;
+                        foreach($ownerDownlines as $downline){
+                            $downline_sub = Subscription::where('package_id',$package->id)->where('user_id',$downline->id)->first();
+                            if($downline_sub){
+                                $ownerPurchasedCount = $ownerPurchasedCount + 1;
+                            }
+                            if($ownerPurchasedCount >= 2){
+                                break;
+                            }
+                        }
+
+                        if($ownerPurchasedCount < 2){
+                            Log::info("Section $sectionNum not rewarded: position 13 user ".$mainOwner->username." has only $ownerPurchasedCount downline purchases (need 2)");
+                            continue;
+                        }
+
+                        // Create Trip and Reward for this section
+                        $trip = new Trip();
+                        $trip->user_id = $mainOwner->id;
+                        $trip->save();
+
+                        $suffixes = [1 => '1st', 2 => '2nd', 3 => '3rd'];
+                        $label = isset($suffixes[$sectionNum]) ? $suffixes[$sectionNum] : ($sectionNum.'th');
+
+                        $newReward = new CircleReward();
+                        $newReward->user_id = $mainOwner->id;
+                        $newReward->circle_id = $circle->id;
+                        $newReward->trip_id = $trip->id;
+                        $newReward->amount = $package->reward_amount;
+                        $newReward->section = $sectionNum;
+                        $newReward->desc = $label.' Section completed';
+                        $newReward->status = 'Success';
+                        $newReward->save();
+
+                        $timer = Timer::where('user_id',$mainOwner->id)->where('package_id',$circle->package_id)->first();
+                        if($timer){
+                            $timer->started_at = now();
+                            $timer->save();
+                        }
+
+                        // Credit with 10% bonus
+                        $base_reward = $package->reward_amount;
+                        $bonus = ($base_reward * 10) / 100;
+                        $total_reward = $base_reward + $bonus;
+
+                        $mainOwner->wallet = $mainOwner->wallet + $total_reward;
+                        $mainOwner->save();
+
+                        $this->create_transaction($mainOwner->id, 'Credit', $total_reward, $mainOwner->wallet, $label.' Section completed (Base: ₹'.$base_reward.' + 10% Bonus: ₹'.$bonus.')');
+                        
+                        Log::info("Section $sectionNum completed: credited ₹$total_reward to position 13 user ".$mainOwner->username);
                     }
-                    // 2nd section of 13th members circle
-                    if($fifth_position->status == 'Occupied' && $six_position->status == 'Occupied' && $seven_position->status == 'Occupied' && $eight_position->status == 'Occupied' && $thirteen_position->status == 'Occupied'){
-                        $new_circle = Circle::where('user_id',$eight_position->user_id)->where('status','Active')->where('package_id',$package->id)->first();
-                        if(!$new_circle){
-                            // Log::info("creating new circle for ".$eight_position->user->username);
-                            $new_circle = new Circle();
-                            $new_circle->user_id = $eight_position->user_id;
-                            $new_circle->name = $this->generateUniqueString(8);
-                            $new_circle->package_id = $package->id;
-                            $new_circle->reward_amount = 0;
-                            $new_circle->status = 'Active';
-                            $new_circle->save();
-                            
-                            for ($i = 1; $i <= $package->total_members; $i++){
-                                $member = new Member();
-                                $member->circle_id = $new_circle->id;
-                                $member->position = $i;
-                                if($i == 4){
-                                    $member->user_id = $fifth_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                if($i == 8){
-                                    $member->user_id = $six_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                if($i == 12){
-                                    $member->user_id = $seven_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                if($i == 13){
-                                    $member->user_id = $eight_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                $member->package_id = $package->id;
-                                $member->save();
-                            }
-                            
-                        }
-                        
-                        // check if already given reward
-                        // Log::info("checking for reward - jump position 13");
-                        $circle_reward = CircleReward::where('circle_id',$circle->id)->where('section',2)->first();
-                        if(!$circle_reward){
-                            // Log::info("no reward given to ".$circle->user->username);
-                            $downlines = $circle->user->downlines;
-                            $purchsed_packages_count = 0;
-                            foreach($downlines as $downline){
-                                $downline_circle = Subscription::where('package_id',$package->id)->where('user_id',$downline->id)->first();
-                                if($downline_circle){
-                                    $purchsed_packages_count = $purchsed_packages_count + 1;
-                                }
-                                if($purchsed_packages_count >= 3){
-                                    break;
-                                }
-                            }
-                            
-                            if($purchsed_packages_count >= 3){
-                                // add reward to referal
-                                // Log::info("creating trip for");
-                                $trip = new Trip();
-                                $trip->user_id = $circle->user_id;
-                                $trip->save();
-                                
-                                // Log::info("creating reward ".$circle->user->username);
-                                $circle_reward = new CircleReward();
-                                $circle_reward->user_id = $circle->user_id;
-                                $circle_reward->circle_id = $circle->id;
-                                $circle_reward->trip_id = $trip->id;
-                                $circle_reward->amount = $package->reward_amount;
-                                $circle_reward->section = 2;
-                                $circle_reward->desc = '2nd Section completed';
-                                $circle_reward->status = 'Success';
-                                $circle_reward->save();
-
-                                $timer = Timer::where('user_id',$circle->user_id)->where('package_id',$circle->package_id)->first();
-                                $timer->started_at = now();
-                                $timer->save();
-                                
-                                // Add 10% bonus to reward amount
-$base_reward = $package->reward_amount;
-$bonus = ($base_reward * 10) / 100;
-$total_reward = $base_reward + $bonus;
-
-$circle->user->wallet = $circle->user->wallet + $total_reward;
-$circle->user->save();
-
-$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '2nd Section completed (Base: ₹'.$base_reward.' + 10% Bonus: ₹'.$bonus.')');
-                            }else{
-                                // Log::info("reward not given due to downlines purchased count ".$purchsed_packages_count. " of ".$circle->user->username);
-                            }
-                        }
-                    }
-                    
-                    // 3rd section of 13th members circle
-                    if($nine_position->status == 'Occupied' && $ten_position->status == 'Occupied' && $eleven_position->status == 'Occupied' && $twelve_position->status == 'Occupied' && $thirteen_position->status == 'Occupied'){
-                        $new_circle = Circle::where('user_id',$twelve_position->user_id)->where('status','Active')->where('package_id',$package->id)->first();
-                        if(!$new_circle){
-                            // Log::info("creating new circle for ".$twelve_position->user->username);
-                            $new_circle = new Circle();
-                            $new_circle->user_id = $twelve_position->user_id;
-                            $new_circle->name = $this->generateUniqueString(8);
-                            $new_circle->package_id = $package->id;
-                            $new_circle->reward_amount = 0;
-                            $new_circle->status = 'Active';
-                            $new_circle->save();
-                            
-                            for ($i = 1; $i <= $package->total_members; $i++){
-                                $member = new Member();
-                                $member->circle_id = $new_circle->id;
-                                $member->position = $i;
-                                if($i == 4){
-                                    $member->user_id = $eleven_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                if($i == 8){
-                                    $member->user_id = $ten_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                if($i == 12){
-                                    $member->user_id = $nine_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                if($i == 13){
-                                    $member->user_id = $twelve_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                $member->package_id = $package->id;
-                                $member->save();
-                            }
-                            
-                        }
-                        
-                        // check if already given reward
-                        // Log::info("checking for reward - jump position 13");
-                        $circle_reward = CircleReward::where('circle_id',$circle->id)->where('section',3)->first();
-                        if(!$circle_reward){
-                            // Log::info("no reward given to ".$circle->user->username);
-                            $downlines = $circle->user->downlines;
-                            $purchsed_packages_count = 0;
-                            foreach($downlines as $downline){
-                                $downline_circle = Subscription::where('package_id',$package->id)->where('user_id',$downline->id)->first();
-                                if($downline_circle){
-                                    $purchsed_packages_count = $purchsed_packages_count + 1;
-                                }
-                                if($purchsed_packages_count >= 3){
-                                    break;
-                                }
-                            }
-                            
-                            if($purchsed_packages_count >= 3){
-                                // add reward to referal
-                                // Log::info("creating trip for");
-                                $trip = new Trip();
-                                $trip->user_id = $circle->user_id;
-                                $trip->save();
-                                
-                                // Log::info("creating reward ".$circle->user->username);
-                                $circle_reward = new CircleReward();
-                                $circle_reward->user_id = $circle->user_id;
-                                $circle_reward->circle_id = $circle->id;
-                                $circle_reward->trip_id = $trip->id;
-                                $circle_reward->amount = $package->reward_amount;
-                                $circle_reward->section = 3;
-                                $circle_reward->desc = '3rd Section completed';
-                                $circle_reward->status = 'Success';
-                                $circle_reward->save();
-
-                                $timer = Timer::where('user_id',$circle->user_id)->where('package_id',$circle->package_id)->first();
-                                $timer->started_at = now();
-                                $timer->save();
-                                
-                                // Add 10% bonus to reward amount
-$base_reward = $package->reward_amount;
-$bonus = ($base_reward * 10) / 100;
-$total_reward = $base_reward + $bonus;
-
-$circle->user->wallet = $circle->user->wallet + $total_reward;
-$circle->user->save();
-
-$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '3rd Section completed (Base: ₹'.$base_reward.' + 10% Bonus: ₹'.$bonus.')');
-                            }else{
-                                // Log::info("reward not given due to downlines purchased count ".$purchsed_packages_count. " of ".$circle->user->username);
-                            }
                         }
                     }
                 }
                 
         if($jump_position == 21){
-                    // Log::info("checking for jump position 21");
-                    if($first_position->status == 'Occupied' && $second_position->status == 'Occupied' && $third_position->status == 'Occupied' && $fourth_position->status == 'Occupied' 
-                        && $fifth_position->status == 'Occupied' && $twenty_one_position->status == 'Occupied'){
-                            
-                        $new_circle = Circle::where('user_id',$fifth_position->user_id)->where('status','Active')->where('package_id',$package->id)->first();
-                        if(!$new_circle){
-                            // Log::info("creating new circle for ".$fifth_position->user->username);
-                            $new_circle = new Circle();
-                            $new_circle->user_id = $fifth_position->user_id;
-                            $new_circle->name = $this->generateUniqueString(8);
-                            $new_circle->package_id = $package->id;
-                            $new_circle->reward_amount = 0;
-                            $new_circle->status = 'Active';
-                            $new_circle->save();
-                            
-                            for ($i = 1; $i <= $package->total_members; $i++){
-                                $member = new Member();
-                                $member->circle_id = $new_circle->id;
-                                $member->position = $i;
-                                if($i == 5){
-                                    $member->user_id = $first_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                if($i == 10){
-                                    $member->user_id = $second_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                if($i == 15){
-                                    $member->user_id = $third_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                if($i == 20){
-                                    $member->user_id = $fourth_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                if($i == 21){
-                                    $member->user_id = $fifth_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                $member->package_id = $package->id;
-                                $member->save();
-                            }
-                            
-                        }
+                    // Evaluate sections independently: blocks [1-4], [6-9], [11-14], [16-19]
+                    // Position 21 user gets reward when any block completes
+                    $positionsMap = [
+                        1 => $first_position, 2 => $second_position, 3 => $third_position, 4 => $fourth_position,
+                        5 => $fifth_position, 6 => $six_position, 7 => $seven_position, 8 => $eight_position, 9 => $nine_position,
+                        10 => $ten_position, 11 => $eleven_position, 12 => $twelve_position, 13 => $thirteen_position, 14 => $fourteen_position,
+                        15 => $fifteen_position, 16 => $sixteen_position, 17 => $seventeen_position, 18 => $eighteen_position, 19 => $nineteen_position,
+                        20 => $twenty_position, 21 => $twenty_one_position,
+                    ];
+
+                    // Map: section => block_positions (layer-2 position must also be occupied)
+                    $sectionConfig = [
+                        1 => ['block' => [1,2,3,4], 'layer2_pos' => 5],
+                        2 => ['block' => [6,7,8,9], 'layer2_pos' => 10],
+                        3 => ['block' => [11,12,13,14], 'layer2_pos' => 15],
+                        4 => ['block' => [16,17,18,19], 'layer2_pos' => 20],
+                    ];
+
+                    // Check if position 21 is occupied (required for sections to complete)
+                    if($positionsMap[21]->status == 'Occupied'){
+                        // Reward goes to circle OWNER, not the person at position 21
+                        $mainOwner = $circle->user;
+                        if($mainOwner){
+
+                    foreach ($sectionConfig as $sectionNum => $config) {
+                        $blockPositions = $config['block'];
+                        $layer2Pos = $config['layer2_pos'];
                         
-                        // check if already given reward
-                        // Log::info("checking for reward - jump position 21");
-                        $circle_reward = CircleReward::where('circle_id',$circle->id)->where('section',1)->first();
-                        if(!$circle_reward){
-                            // Log::info("no reward given to ".$circle->user->username);
-                            $downlines = $circle->user->downlines;
-                            $purchsed_packages_count = 0;
-                            foreach($downlines as $downline){
-                                $downline_circle = Subscription::where('package_id',$package->id)->where('user_id',$downline->id)->first();
-                                if($downline_circle){
-                                    $purchsed_packages_count = $purchsed_packages_count + 1;
-                                }
-                                if($purchsed_packages_count >= 4){
-                                    break;
-                                }
-                            }
-                            
-                            if($purchsed_packages_count >= 4){
-                                // add reward to referal
-                                // Log::info("creating trip for");
-                                $trip = new Trip();
-                                $trip->user_id = $circle->user_id;
-                                $trip->save();
-                                
-                                // Log::info("creating reward ".$circle->user->username);
-                                $circle_reward = new CircleReward();
-                                $circle_reward->user_id = $circle->user_id;
-                                $circle_reward->circle_id = $circle->id;
-                                $circle_reward->trip_id = $trip->id;
-                                $circle_reward->amount = $package->reward_amount;
-                                $circle_reward->section = 1;
-                                $circle_reward->desc = '1st Section completed';
-                                $circle_reward->status = 'Success';
-                                $circle_reward->save();
+                        // Check if layer-2 position is occupied
+                        if(!isset($positionsMap[$layer2Pos]) || $positionsMap[$layer2Pos]->status != 'Occupied'){
+                            continue;
+                        }
 
-                                $timer = Timer::where('user_id',$circle->user_id)->where('package_id',$circle->package_id)->first();
-                                $timer->started_at = now();
-                                $timer->save();
-                                
-                                // Add 10% bonus to reward amount
-$base_reward = $package->reward_amount;
-$bonus = ($base_reward * 10) / 100;
-$total_reward = $base_reward + $bonus;
-
-$circle->user->wallet = $circle->user->wallet + $total_reward;
-$circle->user->save();
-
-$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '1st Section completed (Base: ₹'.$base_reward.' + 10% Bonus: ₹'.$bonus.')');
-                            }else{
-                                // Log::info("reward not given due to downlines purchased count ".$purchsed_packages_count. " of ".$circle->user->username);
+                        // Check if all 4 positions in this block are occupied
+                        $allOccupied = true;
+                        foreach ($blockPositions as $pos) {
+                            if(!isset($positionsMap[$pos]) || $positionsMap[$pos]->status != 'Occupied'){
+                                $allOccupied = false; break;
                             }
                         }
-                    }
-                    // 2nd section of 21th members circle
-                    if($six_position->status == 'Occupied' && $seven_position->status == 'Occupied' && $eight_position->status == 'Occupied' && $nine_position->status == 'Occupied' 
-                        && $ten_position->status == 'Occupied' && $twenty_one_position->status == 'Occupied'){
-                        $new_circle = Circle::where('user_id',$ten_position->user_id)->where('status','Active')->where('package_id',$package->id)->first();
-                        if(!$new_circle){
-                            // Log::info("creating new circle for ".$ten_position->user->username);
-                            $new_circle = new Circle();
-                            $new_circle->user_id = $ten_position->user_id;
-                            $new_circle->name = $this->generateUniqueString(8);
-                            $new_circle->package_id = $package->id;
-                            $new_circle->reward_amount = 0;
-                            $new_circle->status = 'Active';
-                            $new_circle->save();
-                            
-                            for ($i = 1; $i <= $package->total_members; $i++){
-                                $member = new Member();
-                                $member->circle_id = $new_circle->id;
-                                $member->position = $i;
-                                if($i == 5){
-                                    $member->user_id = $six_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                if($i == 10){
-                                    $member->user_id = $seven_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                if($i == 15){
-                                    $member->user_id = $eight_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                if($i == 20){
-                                    $member->user_id = $nine_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                if($i == 21){
-                                    $member->user_id = $ten_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                $member->package_id = $package->id;
-                                $member->save();
-                            }
-                            
+                        if(!$allOccupied){
+                            continue;
                         }
+
+                        // Skip if this section already rewarded
+                        $existing = CircleReward::where('circle_id',$circle->id)
+                                                 ->where('user_id', $mainOwner->id)
+                                                 ->where('section',$sectionNum)
+                                                 ->first();
+                        if($existing){
+                            continue;
+                        }
+
+                        // Check main owner's direct downlines who purchased this package (gate: >=2)
+                        $ownerDownlines = $mainOwner->downlines;
+                        $ownerPurchasedCount = 0;
+                        foreach($ownerDownlines as $downline){
+                            $downline_sub = Subscription::where('package_id',$package->id)->where('user_id',$downline->id)->first();
+                            if($downline_sub){
+                                $ownerPurchasedCount = $ownerPurchasedCount + 1;
+                            }
+                            if($ownerPurchasedCount >= 2){
+                                break;
+                            }
+                        }
+
+                        if($ownerPurchasedCount < 2){
+                            Log::info("Section $sectionNum not rewarded: position 21 user ".$mainOwner->username." has only $ownerPurchasedCount downline purchases (need 2)");
+                            continue;
+                        }
+
+                        // Create Trip and Reward for this section
+                        $trip = new Trip();
+                        $trip->user_id = $mainOwner->id;
+                        $trip->save();
+
+                        $suffixes = [1 => '1st', 2 => '2nd', 3 => '3rd', 4 => '4th'];
+                        $label = isset($suffixes[$sectionNum]) ? $suffixes[$sectionNum] : ($sectionNum.'th');
+
+                        $newReward = new CircleReward();
+                        $newReward->user_id = $mainOwner->id;
+                        $newReward->circle_id = $circle->id;
+                        $newReward->trip_id = $trip->id;
+                        $newReward->amount = $package->reward_amount;
+                        $newReward->section = $sectionNum;
+                        $newReward->desc = $label.' Section completed';
+                        $newReward->status = 'Success';
+                        $newReward->save();
+
+                        $timer = Timer::where('user_id',$mainOwner->id)->where('package_id',$circle->package_id)->first();
+                        if($timer){
+                            $timer->started_at = now();
+                            $timer->save();
+                        }
+
+                        // Credit with 10% bonus
+                        $base_reward = $package->reward_amount;
+                        $bonus = ($base_reward * 10) / 100;
+                        $total_reward = $base_reward + $bonus;
+
+                        $mainOwner->wallet = $mainOwner->wallet + $total_reward;
+                        $mainOwner->save();
+
+                        $this->create_transaction($mainOwner->id, 'Credit', $total_reward, $mainOwner->wallet, $label.' Section completed (Base: ₹'.$base_reward.' + 10% Bonus: ₹'.$bonus.')');
                         
-                        // check if already given reward
-                        // Log::info("checking for reward - jump position 21");
-                        $circle_reward = CircleReward::where('circle_id',$circle->id)->where('section',2)->first();
-                        if(!$circle_reward){
-                            // Log::info("no reward given to ".$circle->user->username);
-                            $downlines = $circle->user->downlines;
-                            $purchsed_packages_count = 0;
-                            foreach($downlines as $downline){
-                                $downline_circle = Subscription::where('package_id',$package->id)->where('user_id',$downline->id)->first();
-                                if($downline_circle){
-                                    $purchsed_packages_count = $purchsed_packages_count + 1;
-                                }
-                                if($purchsed_packages_count >= 4){
-                                    break;
-                                }
-                            }
-                            
-                            if($purchsed_packages_count >= 4){
-                                // add reward to referal
-                                // Log::info("creating trip for");
-                                $trip = new Trip();
-                                $trip->user_id = $circle->user_id;
-                                $trip->save();
-                                
-                                // Log::info("creating reward ".$circle->user->username);
-                                $circle_reward = new CircleReward();
-                                $circle_reward->user_id = $circle->user_id;
-                                $circle_reward->circle_id = $circle->id;
-                                $circle_reward->trip_id = $trip->id;
-                                $circle_reward->amount = $package->reward_amount;
-                                $circle_reward->section = 2;
-                                $circle_reward->desc = '2nd Section completed';
-                                $circle_reward->status = 'Success';
-                                $circle_reward->save();
-                                
-                                $timer = Timer::where('user_id',$circle->user_id)->where('package_id',$circle->package_id)->first();
-                                $timer->started_at = now();
-                                $timer->save();
-
-                                // Add 10% bonus to reward amount
-$base_reward = $package->reward_amount;
-$bonus = ($base_reward * 10) / 100;
-$total_reward = $base_reward + $bonus;
-
-$circle->user->wallet = $circle->user->wallet + $total_reward;
-$circle->user->save();
-
-$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '2nd Section completed (Base: ₹'.$base_reward.' + 10% Bonus: ₹'.$bonus.')');
-                            }else{
-                                // Log::info("reward not given due to downlines purchased count ".$purchsed_packages_count. " of ".$circle->user->username);
-                            }
-                        }
-                    }
-                    
-                    // 3rd section of 21th members circle
-                    if($eleven_position->status == 'Occupied' && $twelve_position->status == 'Occupied' && $thirteen_position->status == 'Occupied' 
-                        && $fourteen_position->status == 'Occupied' && $fifteen_position->status == 'Occupied' && $twenty_one_position->status == 'Occupied'){
-                        $new_circle = Circle::where('user_id',$fifteen_position->user_id)->where('status','Active')->where('package_id',$package->id)->first();
-                        if(!$new_circle){
-                            // Log::info("creating new circle for ".$fifteen_position->user->username);
-                            $new_circle = new Circle();
-                            $new_circle->user_id = $fifteen_position->user_id;
-                            $new_circle->name = $this->generateUniqueString(8);
-                            $new_circle->package_id = $package->id;
-                            $new_circle->reward_amount = 0;
-                            $new_circle->status = 'Active';
-                            $new_circle->save();
-                            
-                            for ($i = 1; $i <= $package->total_members; $i++){
-                                $member = new Member();
-                                $member->circle_id = $new_circle->id;
-                                $member->position = $i;
-                                if($i == 5){
-                                    $member->user_id = $fourteen_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                if($i == 10){
-                                    $member->user_id = $thirteen_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                if($i == 15){
-                                    $member->user_id = $twelve_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                if($i == 20){
-                                    $member->user_id = $eleven_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                if($i == 21){
-                                    $member->user_id = $fifteen_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                $member->package_id = $package->id;
-                                $member->save();
-                            }
-                            
-                        }
-                        
-                        // check if already given reward
-                        // Log::info("checking for reward - jump position 21");
-                        $circle_reward = CircleReward::where('circle_id',$circle->id)->where('section',3)->first();
-                        if(!$circle_reward){
-                            // Log::info("no reward given to ".$circle->user->username);
-                            $downlines = $circle->user->downlines;
-                            $purchsed_packages_count = 0;
-                            foreach($downlines as $downline){
-                                $downline_circle = Subscription::where('package_id',$package->id)->where('user_id',$downline->id)->first();
-                                if($downline_circle){
-                                    $purchsed_packages_count = $purchsed_packages_count + 1;
-                                }
-                                if($purchsed_packages_count >= 4){
-                                    break;
-                                }
-                            }
-                            
-                            if($purchsed_packages_count >= 4){
-                                // add reward to referal
-                                // Log::info("creating trip for");
-                                $trip = new Trip();
-                                $trip->user_id = $circle->user_id;
-                                $trip->save();
-                                
-                                // Log::info("creating reward ".$circle->user->username);
-                                $circle_reward = new CircleReward();
-                                $circle_reward->user_id = $circle->user_id;
-                                $circle_reward->circle_id = $circle->id;
-                                $circle_reward->trip_id = $trip->id;
-                                $circle_reward->amount = $package->reward_amount;
-                                $circle_reward->section = 3;
-                                $circle_reward->desc = '3rd Section completed';
-                                $circle_reward->status = 'Success';
-                                $circle_reward->save();
-
-                                $timer = Timer::where('user_id',$circle->user_id)->where('package_id',$circle->package_id)->first();
-                                $timer->started_at = now();
-                                $timer->save();
-                                
-                                // Add 10% bonus to reward amount
-$base_reward = $package->reward_amount;
-$bonus = ($base_reward * 10) / 100;
-$total_reward = $base_reward + $bonus;
-
-$circle->user->wallet = $circle->user->wallet + $total_reward;
-$circle->user->save();
-
-$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '3rd Section completed (Base: ₹'.$base_reward.' + 10% Bonus: ₹'.$bonus.')');
-                            }else{
-                                // Log::info("reward not given due to downlines purchased count ".$purchsed_packages_count. " of ".$circle->user->username);
-                            }
-                        }
-                    }
-                    
-                    // 4th section of 21th members circle
-                    if($sixteen_position->status == 'Occupied' && $seventeen_position->status == 'Occupied' && $eighteen_position->status == 'Occupied' 
-                        && $nineteen_position->status == 'Occupied' && $twenty_position->status == 'Occupied' && $twenty_one_position->status == 'Occupied'){
-                        $new_circle = Circle::where('user_id',$twenty_position->user_id)->where('status','Active')->where('package_id',$package->id)->first();
-                        if(!$new_circle){
-                            // Log::info("creating new circle for ".$twenty_position->user->username);
-                            $new_circle = new Circle();
-                            $new_circle->user_id = $twenty_position->user_id;
-                            $new_circle->name = $this->generateUniqueString(8);
-                            $new_circle->package_id = $package->id;
-                            $new_circle->reward_amount = 0;
-                            $new_circle->status = 'Active';
-                            $new_circle->save();
-                            
-                            for ($i = 1; $i <= $package->total_members; $i++){
-                                $member = new Member();
-                                $member->circle_id = $new_circle->id;
-                                $member->position = $i;
-                                if($i == 5){
-                                    $member->user_id = $nineteen_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                if($i == 10){
-                                    $member->user_id = $eighteen_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                if($i == 15){
-                                    $member->user_id = $seventeen_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                if($i == 20){
-                                    $member->user_id = $sixteen_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                if($i == 21){
-                                    $member->user_id = $twenty_position->user_id;
-                                    $member->status = 'Occupied';
-                                }
-                                $member->package_id = $package->id;
-                                $member->save();
-                            }
-                            
-                        }
-                        
-                        // check if already given reward
-                        // Log::info("checking for reward - jump position 21");
-                        $circle_reward = CircleReward::where('circle_id',$circle->id)->where('section',4)->first();
-                        if(!$circle_reward){
-                            // Log::info("no reward given to ".$circle->user->username);
-                            $downlines = $circle->user->downlines;
-                            $purchsed_packages_count = 0;
-                            foreach($downlines as $downline){
-                                $downline_circle = Subscription::where('package_id',$package->id)->where('user_id',$downline->id)->first();
-                                if($downline_circle){
-                                    $purchsed_packages_count = $purchsed_packages_count + 1;
-                                }
-                                if($purchsed_packages_count >= 4){
-                                    break;
-                                }
-                            }
-                            
-                            if($purchsed_packages_count >= 4){
-                                // add reward to referal
-                                // Log::info("creating trip for");
-                                $trip = new Trip();
-                                $trip->user_id = $circle->user_id;
-                                $trip->save();
-                                
-                                // Log::info("creating reward ".$circle->user->username);
-                                $circle_reward = new CircleReward();
-                                $circle_reward->user_id = $circle->user_id;
-                                $circle_reward->circle_id = $circle->id;
-                                $circle_reward->trip_id = $trip->id;
-                                $circle_reward->amount = $package->reward_amount;
-                                $circle_reward->section = 4;
-                                $circle_reward->desc = '4th Section completed';
-                                $circle_reward->status = 'Success';
-                                $circle_reward->save();
-
-                                $timer = Timer::where('user_id',$circle->user_id)->where('package_id',$circle->package_id)->first();
-                                $timer->started_at = now();
-                                $timer->save();
-                                
-                                // Add 10% bonus to reward amount
-$base_reward = $package->reward_amount;
-$bonus = ($base_reward * 10) / 100;
-$total_reward = $base_reward + $bonus;
-
-$circle->user->wallet = $circle->user->wallet + $total_reward;
-$circle->user->save();
-
-$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '4th Section completed (Base: ₹'.$base_reward.' + 10% Bonus: ₹'.$bonus.')');
-                            }else{
-                                // Log::info("reward not given due to downlines purchased count ".$purchsed_packages_count. " of ".$circle->user->username);
-                            }
-                        }
+                        Log::info("Section $sectionNum completed: credited ₹$total_reward to position 21 user ".$mainOwner->username);
                     }
                 }
+            }
+        }
     }
     
     public function is_circle_completed($circle_id,$package_id,$user_id)

@@ -44,6 +44,12 @@ class SettingController extends Controller
         $setting->pagination = $request->pagination;
         if($request->hasFile('logo')) {
             $file= $request->file('logo');
+            
+            // Validate that we have a valid file object
+            if (!$file || !$file->isValid()) {
+                return redirect()->back()->with('error', 'Invalid logo file uploaded');
+            }
+            
             $allowedfileExtension=['JPEG','jpg','png'];
             $extension = $file->getClientOriginalExtension();
             $check = in_array($extension,$allowedfileExtension);
@@ -57,11 +63,19 @@ class SettingController extends Controller
                 $filename = substr(str_shuffle(str_repeat($pool, 5)), 0, 12) .'.'.$extension;
                 $path = $file->move(public_path('/images/bussiness'), $filename);
                 $setting->logo = $filename;
+            }else{
+                return redirect()->back()->with('error', 'Invalid logo file format, please upload valid image file');
             }
         }
         
         if($request->hasFile('favicon')) {
             $file= $request->file('favicon');
+            
+            // Validate that we have a valid file object
+            if (!$file || !$file->isValid()) {
+                return redirect()->back()->with('error', 'Invalid favicon file uploaded');
+            }
+            
             $allowedfileExtension=['JPEG','jpg','png'];
             $extension = $file->getClientOriginalExtension();
             $check = in_array($extension,$allowedfileExtension);
@@ -75,6 +89,8 @@ class SettingController extends Controller
                 $filename = 'favicon' .'.'.$extension;
                 $path = $file->move(public_path('/images/bussiness'), $filename);
                 $setting->favicon = $filename;
+            }else{
+                return redirect()->back()->with('error', 'Invalid favicon file format, please upload valid image file');
             }
         }
         
@@ -132,6 +148,12 @@ class SettingController extends Controller
         // Handle file upload
         if ($request->hasFile('add_url')) {
             $file = $request->file('add_url');
+            
+            // Validate that we have a valid file object
+            if (!$file || !$file->isValid()) {
+                return redirect()->back()->with('error', 'Invalid advertisement file uploaded');
+            }
+            
             $extension = $file->getClientOriginalExtension();
             $filename = uniqid() . '.' . $extension;
             $path = public_path('uploads/adds'); // Ensure this directory exists

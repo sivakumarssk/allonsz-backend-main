@@ -301,10 +301,16 @@ class AdminController extends Controller
         
         if($request->hasFile('photo')) {
             $file= $request->file('photo');
+            
+            // Validate that we have a valid file object
+            if (!$file || !$file->isValid()) {
+                return redirect()->back()->with('error', 'Invalid file uploaded');
+            }
+            
             $allowedfileExtension=['JPEG','jpg','png'];
             $extension = $file->getClientOriginalExtension();
             $check = in_array($extension,$allowedfileExtension);
-            // if($check){
+            if($check){
                 $file_path = public_path('/images/profiles'.$customer->photo);
                 if(file_exists($file_path) && $customer->photo != '')
                 {
@@ -314,7 +320,9 @@ class AdminController extends Controller
                 $filename = substr(str_shuffle(str_repeat($pool, 5)), 0, 12) .'.'.$extension;
                 $path = $file->move(public_path('/images/profiles'), $filename);
                 $customer->photo = $filename;
-            // }
+            }else{
+                return redirect()->back()->with('error', 'Invalid file format, please upload valid image file');
+            }
         }
         $customer->id = 1;
         $customer->first_name = $request->first_name;

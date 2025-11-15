@@ -48,10 +48,16 @@ class TourController extends Controller
         }
         if($request->hasFile('photo')) {
             $file= $request->file('photo');
+            
+            // Validate that we have a valid file object
+            if (!$file || !$file->isValid()) {
+                return redirect()->back()->with('error', 'Invalid file uploaded');
+            }
+            
             $allowedfileExtension=['JPEG','jpg','png'];
             $extension = $file->getClientOriginalExtension();
             $check = in_array($extension,$allowedfileExtension);
-            // if($check){
+            if($check){
                 $oldFilePath = public_path('/images/toures/'.$tour->photo_filename);
                 if (file_exists($oldFilePath) && $tour->photo_filename != '') {
                     unlink($oldFilePath);
@@ -60,7 +66,9 @@ class TourController extends Controller
                 $filename = substr(str_shuffle(str_repeat($pool, 5)), 0, 12) .'.'.$extension;
                 $path = $file->move(public_path('/images/toures'), $filename);
                 $tour->photo = $filename;
-            // }
+            }else{
+                return redirect()->back()->with('error', 'Invalid file format, please upload valid image file');
+            }
         }
         $tour->type = $request->type;
         $tour->name = $request->name;

@@ -55,9 +55,6 @@ use App\Http\Controllers\TruthScreenController;
             Route::get('get-add',[CustomerController::class,'get_add']);
             Route::get('get-timer',[CustomerController::class,'get_timer']);
 
-            Route::get('get-auto-renew-status',[CustomerController::class,'get_auto_renew_status']);
-            Route::post('toggle-auto-renew',[CustomerController::class,'toggle_auto_renew']);
-
             Route::get('check-timer-alert',[CustomerController::class,'check_timer_alert']);
 
             Route::post('update-referal-code',[CustomerController::class,'update_referal_code']);
