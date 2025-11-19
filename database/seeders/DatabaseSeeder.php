@@ -12,7 +12,9 @@ class DatabaseSeeder extends Seeder
     public function run()
     {
         // Insert basic settings
-        DB::table('settings')->insert([
+        DB::table('settings')->updateOrInsert(
+            ['id' => 1],
+            [
             'bussiness_name' => 'Allons-Z',
             'logo' => 'logo.png',
             'favicon' => 'favicon.ico',
@@ -44,13 +46,18 @@ class DatabaseSeeder extends Seeder
             'faqs' => 'FAQs content here',
             'created_at' => now(),
             'updated_at' => now(),
-        ]);
+            ]
+        );
 
         // Insert countries
-        DB::table('countries')->insert([
-            ['name' => 'India', 'code' => 'IN', 'created_at' => now(), 'updated_at' => now()],
-            ['name' => 'United States', 'code' => 'US', 'created_at' => now(), 'updated_at' => now()],
-        ]);
+        DB::table('countries')->updateOrInsert(
+            ['code' => 'IN'],
+            ['name' => 'India', 'created_at' => now(), 'updated_at' => now()]
+        );
+        DB::table('countries')->updateOrInsert(
+            ['code' => 'US'],
+            ['name' => 'United States', 'created_at' => now(), 'updated_at' => now()]
+        );
 
         // Insert states for India
         DB::table('states')->insert([
@@ -163,24 +170,27 @@ class DatabaseSeeder extends Seeder
         }
 
         // Insert admin user
-$adminId = DB::table('users')->insertGetId([
-    'role' => 'admin',
-    'first_name' => 'Admin',
-    'last_name' => 'User',
-    'username' => 'admin',
-    'email' => 'admin@example.com',
-    'phone' => '9999999999',
-    'password' => Hash::make('Admin@123'),
-    'email_verified_at' => now(),
-    'referal_code' => 'ADMIN123',
-    'referal_id' => null,  // Admin has no upline
-    'wallet' => 0,
-    'status' => 'Active',
-    'profile_status' => 'Verified',
-    'gender' => 'Male',
-    'created_at' => now(),
-    'updated_at' => now(),
-]);
+        DB::table('users')->updateOrInsert(
+            ['username' => 'admin'],
+            [
+                'role' => 'admin',
+                'first_name' => 'Admin',
+                'last_name' => 'User',
+                'email' => 'admin@example.com',
+                'phone' => '9999999999',
+                'password' => Hash::make('Admin@123'),
+                'email_verified_at' => now(),
+                'referal_code' => 'ADMIN123',
+                'referal_id' => null,  // Admin has no upline
+                'wallet' => 0,
+                'status' => 'Active',
+                'profile_status' => 'Verified',
+                'gender' => 'Male',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]
+        );
+        $adminId = DB::table('users')->where('username', 'admin')->value('id');
 
         // Insert sample tours
         DB::table('tours')->insert([
@@ -209,15 +219,15 @@ $adminId = DB::table('users')->insertGetId([
        // Create a circle + members + timer for each package
 $packages = DB::table('packages')->get();
 foreach ($packages as $package) {
-    // $circleId = DB::table('circles')->insertGetId([
-    //     'user_id' => $adminId,
-    //     'name' => strtoupper(substr(md5(uniqid()), 0, 8)),
-    //     'package_id' => $package->id,
-    //     'reward_amount' => 0,
-    //     'status' => 'Active',
-    //     'created_at' => now(),
-    //     'updated_at' => now(),
-    // ]);
+    $circleId = DB::table('circles')->insertGetId([
+        'user_id' => $adminId,
+        'name' => strtoupper(substr(md5(uniqid()), 0, 8)),
+        'package_id' => $package->id,
+        'reward_amount' => 0,
+        'status' => 'Active',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
 
     for ($i = 1; $i <= $package->total_members; $i++) {
         DB::table('members')->insert([
