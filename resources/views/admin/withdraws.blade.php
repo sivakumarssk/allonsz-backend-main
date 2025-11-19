@@ -132,7 +132,7 @@
             <label for="code" class="col-form-label">Status:</label>
             <select name="status" class="form-control" id="status" required>
                 <option value="Pending">Pending</option>
-                <option value="Accepted">Accepted</option>
+                <option value="Approved">Approved</option>
             </select>
           </div>
           <input type="hidden" name="id" id="edit-id">

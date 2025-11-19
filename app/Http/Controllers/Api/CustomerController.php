@@ -1404,14 +1404,22 @@ class CustomerController extends Controller
         }
         
         $user = Auth::User();
-        if($user->wallet < $request->amount){
+        
+        // Calculate available balance (wallet minus pending withdrawals)
+        $pending_withdrawals = Withdraw::where('user_id', $user->id)
+            ->where('status', 'Pending')
+            ->sum('amount');
+        $available_balance = $user->wallet - $pending_withdrawals;
+        
+        if($available_balance < $request->amount){
             return response()->json([
                 'error' => 'Insufficient wallet balance'
             ],422);
         }
         
-        $user->wallet = $user->wallet - $request->amount;
-        $user->save();
+        // Don't deduct wallet here - only deduct when approved by admin
+        // This prevents wallet balance issues if request is rejected
+        // The available balance check above ensures user can't request more than available
         
         $withdraw = new Withdraw();
         $withdraw->user_id = Auth::User()->id;

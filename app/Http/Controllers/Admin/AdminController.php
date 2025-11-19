@@ -526,7 +526,7 @@ class AdminController extends Controller
         $rules = [
             'id' => 'required|exists:withdraws,id',
             'transfer_details' => 'required',
-            'status' => 'required|in:Pending,Accepted',
+            'status' => 'required|in:Pending,Approved,pending,approved,rejected,completed',
         ];
         
         $validation = \Validator::make( $request->all(), $rules );
@@ -535,14 +535,37 @@ class AdminController extends Controller
         }
         
         $withdraw = Withdraw::find($request->id);
+        $old_status = $withdraw->status;
         $withdraw->transfer_details = $request->transfer_details;
-        $withdraw->status = $request->status;
-        $withdraw->save();
-
+        
+        // Convert frontend status (Pending/Approved) to database enum format (pending/approved)
+        $status = strtolower($request->status);
+        // Map "accepted" to "approved" if needed (for backward compatibility)
+        if($status == 'accepted') {
+            $status = 'approved';
+        }
+        
         $user = $withdraw->user;
         $reason = 'Withdrawal:'.$withdraw->id;
         $transaction = Transaction::where('reason',$reason)->first();
-        if($withdraw->status == 'Accepted'){
+        
+        // Handle wallet deduction/refund based on status change
+        if($status == 'approved' && $old_status != 'approved'){
+            // For new withdrawals: deduct wallet only when approved
+            // For old withdrawals: wallet was already deducted, so just update transaction
+            
+            // Check if wallet needs to be deducted
+            // If wallet balance is sufficient, it means it wasn't deducted yet (new withdrawal)
+            // If wallet balance is insufficient, it was likely already deducted (old withdrawal)
+            if($user->wallet >= $withdraw->amount){
+                // Wallet has enough - this is a new withdrawal, deduct now
+                $user->wallet = $user->wallet - $withdraw->amount;
+                $user->save();
+            }
+            // If wallet doesn't have enough, assume it was already deducted (old withdrawal)
+            // In this case, we don't deduct again, just update the transaction
+            
+            // Create or update transaction with correct balance (current wallet after processing)
             if(!$transaction){
                 $transaction = new Transaction();
             }
@@ -550,13 +573,30 @@ class AdminController extends Controller
             $transaction->type = 'Debit';
             $transaction->reason = $reason;
             $transaction->amount = $withdraw->amount;
-            $transaction->balance = $user->wallet;
+            $transaction->balance = $user->wallet; // Current wallet balance (after deduction if needed)
             $transaction->save();
-        }else{
+            
+        } elseif(($status == 'rejected' || $status == 'pending') && $old_status == 'approved'){
+            // If changing from approved to rejected/pending, refund the amount
+            // This handles both old and new withdrawals
+            $user->wallet = $user->wallet + $withdraw->amount;
+            $user->save();
+            
+            // Delete the transaction if it exists
             if($transaction){
                 $transaction->delete();
             }
+        } elseif($status == 'approved' && $old_status == 'approved'){
+            // Status already approved, just update transaction balance to reflect current wallet
+            // This ensures transaction balance is always accurate
+            if($transaction){
+                $transaction->balance = $user->wallet;
+                $transaction->save();
+            }
         }
+        
+        $withdraw->status = $status;
+        $withdraw->save();
         
         return redirect()->back()->with('success','Withdraw request updated successfully');
         
