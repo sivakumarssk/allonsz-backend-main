@@ -21,6 +21,7 @@ use App\Http\Controllers\TruthScreenController;
         Route::post('setup-otp',[CustomerController::class,'setup_otp']);
         Route::post('update-password',[CustomerController::class,'update_password']);
         Route::post('update-profile',[CustomerController::class,'update_profile']);
+        Route::post('get-user-by-referral',[CustomerController::class,'get_user_by_referral']);
         Route::post('update-profile-photo',[CustomerController::class,'update_profile_photo']);
         Route::post('delete-account',[CustomerController::class,'delete_account']);
         Route::post('get-countries',[CustomerController::class,'get_countries']);

@@ -152,8 +152,28 @@ class User extends Authenticatable
             ->orderBy('id', 'desc')
             ->pluck('circle_id');
         
-        return $circles = Circle::whereIn('id',$circleds)->with(['package','members'])->get();
-        // return $circles =  $this->hasMany('App\Models\Circle')->where('status','Active')->orderBy('id','desc')->with(['package','members']);
+        // Get circles where user is a member (existing logic for 2, 3, 4 downline circles)
+        // Exclude 5-member circles from this query - for 5-member circles, users should only see their own circles
+        $circles = Circle::whereIn('id',$circleds)
+            ->where('status','Active')
+            ->whereHas('package', function($query) {
+                $query->where('total_members', '!=', 5); // Exclude 5-member circles
+            })
+            ->with(['package','members'])
+            ->get();
+        
+        // For 5-member circles: ONLY include circles where user is the owner (position 5)
+        // Users should NOT see circles where they are just filling positions 1-4
+        $user_5_member_circles = Circle::where('user_id', $this->id)
+            ->whereHas('package', function($query) {
+                $query->where('total_members', 5);
+            })
+            ->where('status', 'Active')
+            ->with(['package','members'])
+            ->get();
+        
+        // Merge and return unique circles
+        return $circles->merge($user_5_member_circles)->unique('id');
     }
     
     // public function getActiveCirclesAttribute()
@@ -220,6 +240,14 @@ class User extends Authenticatable
     public function create_circle_members($circle_id)
     {
         $circle = Circle::with('package')->find($circle_id);
+        
+        // Check if this is a 5-member circle
+        if($circle->package->total_members == 5){
+            $this->create_5_member_circle_members($circle_id);
+            return;
+        }
+        
+        // Existing logic for 2, 3, 4 downline circles - DO NOT CHANGE
         $member = new Member();
         $member->circle_id = $circle->id;
         $member->user_id = $this->id;
@@ -234,6 +262,57 @@ class User extends Authenticatable
             $member->package_id = $circle->package_id;
             $member->save();
         }
+    }
+    
+    /**
+     * Create 5-member circle members
+     * Positions 1-4 are empty, position 5 is occupied by the circle owner
+     */
+    public function create_5_member_circle_members($circle_id)
+    {
+        $circle = Circle::with('package')->find($circle_id);
+        
+        // Create positions 1-4 as empty
+        for ($i = 1; $i <= 4; $i++){
+            $member = new Member();
+            $member->circle_id = $circle->id;
+            $member->position = $i;
+            $member->status = 'Empty';
+            $member->package_id = $circle->package_id;
+            $member->save();
+        }
+        
+        // Position 5 is occupied by the circle owner
+        $member = new Member();
+        $member->circle_id = $circle->id;
+        $member->user_id = $this->id;
+        $member->position = 5;
+        $member->status = 'Occupied';
+        $member->package_id = $circle->package_id;
+        $member->save();
+    }
+    
+    /**
+     * Create 5-member circle (simple circle)
+     */
+    public function create_5_member_circle($package_id)
+    {
+        $package = Package::find($package_id);
+        if($package->total_members != 5){
+            return false; // Not a 5-member circle
+        }
+        
+        $name = $this->generateUniqueString(8);
+        $circle = new Circle();
+        $circle->user_id = $this->id;
+        $circle->name = $name;
+        $circle->package_id = $package->id;
+        $circle->reward_amount = 0;
+        $circle->status = 'Active';
+        $circle->save();
+        $this->create_5_member_circle_members($circle->id);
+        
+        return $circle;
     }
     
     public function update_circle_member($circle_id,$user_id)

@@ -29,10 +29,14 @@ class PackageController extends Controller
         $rules = [
             'name' => 'required',
             'price' => 'required',
-            'max_downlines_2' => 'required',
             'total_members' => 'required',
             'reward_amount' => 'required',
         ];
+        
+        // max_downlines_2 is only required for non-5-member circles
+        if($request->total_members != 5) {
+            $rules['max_downlines_2'] = 'required';
+        }
     
         $msg = 'Package Added';
         $package = new Package();
@@ -50,7 +54,8 @@ class PackageController extends Controller
         
         $package->name = $request->name;
         $package->price = $request->price;
-        $package->max_downlines = $request->max_downlines_2;
+        // For 5-member circles, max_downlines should be null
+        $package->max_downlines = ($request->total_members == 5) ? null : $request->max_downlines_2;
         $package->total_members = $request->total_members;
         $package->reward_amount = $request->reward_amount;
         $package->save();
@@ -69,7 +74,15 @@ class PackageController extends Controller
         
         if (!$request->id) {
             $admin = User::first();
-            $admin->create_circle($package->id);
+            
+            // Check if this is a 5-member circle
+            if($package->total_members == 5) {
+                // Create 5-member circle
+                $admin->create_5_member_circle($package->id);
+            } else {
+                // Create regular circle (2, 3, 4 members)
+                $admin->create_circle($package->id);
+            }
 
             $timer = new Timer();
             $timer->user_id = $admin->id;

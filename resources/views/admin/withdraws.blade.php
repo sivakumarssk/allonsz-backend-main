@@ -57,6 +57,7 @@
                     <th>Amount</th>
                     <th>Transfer Details</th>
                     <th>Status</th>
+                    <th>Rejection Reason</th>
                     <th>Requested at</th>
                     <th>Updated at</th>
                     <!-- <th>Action</th> -->
@@ -73,12 +74,27 @@
                     <td><a href="{{url('/show-customer',$withdraw->user_id)}}" target="_blank">{{$withdraw->user->name}}</a></td>
                     <td>{{$withdraw->amount}}</td>
                     <td>{{$withdraw->transfer_details}}</td>
-                    <td>{{$withdraw->status}}</td>
+                    <td>
+                      @if(strtolower($withdraw->status) == 'rejected')
+                        <span class="badge badge-danger">{{$withdraw->status}}</span>
+                      @elseif(strtolower($withdraw->status) == 'approved')
+                        <span class="badge badge-success">{{$withdraw->status}}</span>
+                      @else
+                        <span class="badge badge-warning">{{$withdraw->status}}</span>
+                      @endif
+                    </td>
+                    <td>
+                      @if($withdraw->rejection_reason)
+                        <small>{{$withdraw->rejection_reason}}</small>
+                      @else
+                        <span class="text-muted">-</span>
+                      @endif
+                    </td>
                     <td>{{$withdraw->created_at}}</td>
                     <td>{{$withdraw->updated_at}}</td>
                     <td>
                       <button class="btn btn-sm btn-primary" data-toggle="modal" data-target="#addModal" data-id="{{$withdraw->id}}" data-name="{{$withdraw->user->name}}" data-user_id="{{$withdraw->user_id}}"
-                      data-amount="{{$withdraw->amount}}" data-transfer_details="{{$withdraw->transfer_details}}" data-status="{{$withdraw->status}}"><i class="fa fa-edit"></i></button>
+                      data-amount="{{$withdraw->amount}}" data-transfer_details="{{$withdraw->transfer_details}}" data-status="{{$withdraw->status}}" data-rejection_reason="{{$withdraw->rejection_reason}}"><i class="fa fa-edit"></i></button>
                     </td>
 
                   </tr>
@@ -130,10 +146,17 @@
           </div>
           <div class="form-group">
             <label for="code" class="col-form-label">Status:</label>
-            <select name="status" class="form-control" id="status" required>
+            <select name="status" class="form-control" id="status" required disabled>
                 <option value="Pending">Pending</option>
                 <option value="Approved">Approved</option>
+                <option value="Rejected">Rejected</option>
             </select>
+            <small id="status-help" class="form-text text-muted" style="display: none; color: red !important;">Status cannot be changed once approved or rejected.</small>
+          </div>
+          <div class="form-group" id="rejection-reason-group" style="display: none;">
+            <label for="rejection_reason" class="col-form-label">Rejection Reason/Remarks: <span class="text-danger">*</span></label>
+            <textarea name="rejection_reason" class="form-control" id="rejection_reason" placeholder="Please provide a reason for rejection (minimum 5 characters)" rows="3"></textarea>
+            <small class="form-text text-muted">This field is required when rejecting a withdrawal request.</small>
           </div>
           <input type="hidden" name="id" id="edit-id">
           <input type="hidden" name="user_id" id="user-id">
@@ -211,12 +234,69 @@
 
     $('#addModal').on('show.bs.modal', function (event) {
       var button = $(event.relatedTarget);
+      var currentStatus = button.data('status');
+      var statusLower = currentStatus ? currentStatus.toLowerCase() : '';
+      
       $('#edit-id').val(button.data('id'));
       $('#name').val(button.data('name'));
-      $('#user_id').val(button.data('user_id'));
+      $('#user-id').val(button.data('user_id'));
       $('#amount').val(button.data('amount'));
       $('#transfer_details').val(button.data('transfer_details'));
-      $('#status').val(button.data('status'));
+      $('#status').val(currentStatus);
+      $('#rejection_reason').val(button.data('rejection_reason') || '');
+      
+      // Disable status dropdown if already approved or rejected
+      if(statusLower == 'approved' || statusLower == 'rejected') {
+        $('#status').prop('disabled', true);
+        $('#status-help').show();
+        $('#save-button').prop('disabled', true).text('Cannot Edit Status');
+      } else {
+        $('#status').prop('disabled', false);
+        $('#status-help').hide();
+        $('#save-button').prop('disabled', false).text('Save');
+      }
+      
+      // Show/hide rejection reason field based on status
+      toggleRejectionReason();
+    });
+    
+    // Toggle rejection reason field based on status selection
+    $('#status').on('change', function() {
+      toggleRejectionReason();
+    });
+    
+    function toggleRejectionReason() {
+      var status = $('#status').val();
+      if(status == 'Rejected') {
+        $('#rejection-reason-group').show();
+        $('#rejection_reason').prop('required', true);
+      } else {
+        $('#rejection-reason-group').hide();
+        $('#rejection_reason').prop('required', false);
+        $('#rejection_reason').val('');
+      }
+    }
+    
+    // Form validation before submit
+    $('.add-form').on('submit', function(e) {
+      // Prevent submission if status is disabled (already approved/rejected)
+      if($('#status').prop('disabled')) {
+        e.preventDefault();
+        alert('Cannot update withdrawal request that is already approved or rejected');
+        return false;
+      }
+      
+      var status = $('#status').val();
+      var rejectionReason = $('#rejection_reason').val().trim();
+      
+      if(status == 'Rejected' && rejectionReason.length < 5) {
+        e.preventDefault();
+        alert('Please provide a rejection reason (minimum 5 characters)');
+        $('#rejection_reason').focus();
+        return false;
+      }
+      
+      return true;
     });
     
     $('.status').bootstrapSwitch('state');

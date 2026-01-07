@@ -505,8 +505,19 @@ class CustomerController extends Controller
         $user = Auth::User();
         $user = User::where('id',$user->id)->with(['country','state','district','mandal'])->first();
         $user->referal_id = $user->referal ? $user->referal->referal_code : 'N/A';
+        
+        // Add wallet breakdown for 5-member circle rewards
+        $wallet = $user->wallet ?? 0;
+        $not_withdraw_amount = $user->not_withdraw_amount ?? 0;
+        $total_wallet = $wallet + $not_withdraw_amount;
+        
         return response()->json([
-            'user' => $user
+            'user' => $user,
+            'wallet_breakdown' => [
+                'withdrawable_amount' => $wallet,
+                'non_withdrawable_amount' => $not_withdraw_amount,
+                'total_amount' => $total_wallet
+            ]
         ],200);
     }
     
@@ -818,27 +829,45 @@ class CustomerController extends Controller
 
     public function get_circles(Request $request)
     {
-        $circles = Auth::User()->active_circles();
-        foreach($circles as $circle){
-            $timer = Timer::where('user_id',Auth::User()->id)->where('package_id',$circle->package_id)->first();
-            $purchased_at = $timer->started_at;
-            $expiresAt = $purchased_at->copy()->addDays(120); // Changed from 60 to 120 days (4 months)
-            $circle['purchased_at'] = $expiresAt;
+        $user = Auth::User();
+        // active_circles() already includes 5-member circles where user is the owner
+        $all_circles = $user->active_circles();
+        
+        foreach($all_circles as $circle){
+            // Check if this is a 5-member circle
+            $is_5_member = $circle->package->total_members == 5;
+            
+            if($is_5_member){
+                // For 5-member circles, add completion message if completed
+                if($circle->status == 'Completed'){
+                    $circle['completion_message'] = 'Circle completed. Please update the package.';
+                }
+            } else {
+                // Existing logic for 2, 3, 4 downline circles
+                $timer = Timer::where('user_id', $user->id)->where('package_id', $circle->package_id)->first();
+                if($timer){
+                    $purchased_at = $timer->started_at;
+                    $expiresAt = $purchased_at->copy()->addDays(120); // Changed from 60 to 120 days (4 months)
+                    $circle['purchased_at'] = $expiresAt;
+                }
+            }
+            
             foreach($circle->members as $member){
-                $color = Color::where('package_id',$circle->package_id)->where('position',$member->position)->first();
-                $member['color'] = $color->color;
+                $color = Color::where('package_id', $circle->package_id)->where('position', $member->position)->first();
+                if($color){
+                    $member['color'] = $color->color;
+                }
                 $member['is_downline'] = false;
                 if($member->user)
                 {
-                    if($member->user->referal_id == Auth::User()->id || $member->user_id == Auth::User()->id){
+                    if($member->user->referal_id == $user->id || $member->user_id == $user->id){
                         $member['is_downline'] = true;
                     }
                 }
-                
             }
         }
         return response()->json([
-                'circles' => $circles
+                'circles' => $all_circles
         ],200);
     }
     
@@ -926,6 +955,7 @@ class CustomerController extends Controller
     {
         $rules = [
             'package_id' => 'required|numeric',
+            'payment_type' => 'nullable|in:wallet,razorpay',
         ];
     
         $validation = \Validator::make($request->all(), $rules);
@@ -949,14 +979,81 @@ class CustomerController extends Controller
                 'error' => 'You already have purchased this package'
             ], 422);
         }
-        $item_name = $package->name;
-        $item_number = $package->id;
-        $item_amount = $package->price;
-
+        
+        $payment_type = $request->payment_type ?? 'razorpay'; // Default to razorpay if not specified
+        
         $setting = Setting::first();
         $sgst = (($setting->sgst * $package->price) / 100);
         $cgst = (($setting->cgst * $package->price) / 100);
         $total =  $sgst + $cgst + $package->price;
+        
+        // Handle wallet payment
+        if($payment_type === 'wallet') {
+            // Calculate total available balance (withdrawable + non-withdrawable)
+            $wallet_balance = $user->wallet ?? 0;
+            $not_withdraw_balance = $user->not_withdraw_amount ?? 0;
+            $total_available = $wallet_balance + $not_withdraw_balance;
+            
+            // Check if user has sufficient balance (from both wallet and not_withdraw_amount)
+            if($total_available < $total) {
+                return response()->json([
+                    'error' => 'Insufficient wallet balance. Required: ₹' . number_format($total, 2) . ', Available: ₹' . number_format($total_available, 2) . ' (Withdrawable: ₹' . number_format($wallet_balance, 2) . ', Non-withdrawable: ₹' . number_format($not_withdraw_balance, 2) . ')'
+                ], 422);
+            }
+            
+            // Create order
+            $order = new Order();
+            $order->user_id = $user->id;
+            $order->package_id = $package->id;
+            $order->order_id = 'wallet_' . uniqid() . time();
+            $order->payment_id = 'wallet_payment_' . uniqid();
+            $order->amount = $total;
+            $order->payment_method = 'wallet';
+            $order->status = 'Verified';
+            $order->save();
+            
+            // Deduct from not_withdraw_amount first, then from wallet
+            $remaining_amount = $total;
+            
+            // First, deduct from not_withdraw_amount (if available)
+            if($not_withdraw_balance > 0 && $remaining_amount > 0) {
+                if($not_withdraw_balance >= $remaining_amount) {
+                    // All amount can be deducted from not_withdraw_amount
+                    $user->not_withdraw_amount = $not_withdraw_balance - $remaining_amount;
+                    $remaining_amount = 0;
+                } else {
+                    // Deduct all from not_withdraw_amount, remainder from wallet
+                    $remaining_amount = $remaining_amount - $not_withdraw_balance;
+                    $user->not_withdraw_amount = 0;
+                }
+            }
+            
+            // Then, deduct remaining amount from wallet (if any)
+            if($remaining_amount > 0) {
+                $user->wallet = $wallet_balance - $remaining_amount;
+            }
+            
+            $user->save();
+            
+            // Create transaction
+            $transaction = new Transaction();
+            $transaction->user_id = $user->id;
+            $transaction->type = 'Debit';
+            $transaction->reason = $package->name . ' Package Purchased (Wallet)';
+            $transaction->amount = $total;
+            // Calculate total balance after deduction
+            $total_balance_after = ($user->wallet ?? 0) + ($user->not_withdraw_amount ?? 0);
+            $transaction->balance = $total_balance_after;
+            $transaction->save();
+            
+            // Complete the purchase
+            return $this->complete_package_purchase($user, $package, $order);
+        }
+        
+        // Continue with Razorpay payment flow
+        $item_name = $package->name;
+        $item_number = $package->id;
+        $item_amount = $package->price;
 
         $orderData = [
             'receipt'         => strval($item_number),
@@ -967,6 +1064,7 @@ class CustomerController extends Controller
         
         $razorpayOrder = $this->api->order->create($orderData);
         $razorpayOrderId = $razorpayOrder['id'];
+        
         $displayAmount = $amount = $orderData['amount'];
                     
         if ($this->displayCurrency !== 'INR')
@@ -1009,6 +1107,8 @@ class CustomerController extends Controller
         $order->user_id = $user->id;
         $order->package_id = $package->id;
         $order->order_id = $razorpayOrderId;
+        $order->amount = $total;
+        $order->payment_method = 'razorpay';
         $order->status = 'Created';
         $order->save();
         
@@ -1017,10 +1117,87 @@ class CustomerController extends Controller
                 'displayCurrency' => $displayCurrency
         ],200);
     }
+    
+    /**
+     * Helper method to complete package purchase (subscription, circle, timer, email)
+     * This is called after payment is verified (either wallet or Razorpay)
+     */
+    private function complete_package_purchase($user, $package, $order)
+    {
+        // Create subscription
+        $subscription = new Subscription();
+        $subscription->user_id = $user->id;
+        $subscription->package_id = $package->id;
+        $subscription->status = 'Active';
+        $subscription->save();
+        
+        // Handle circle creation based on package type
+        if($package->total_members == 5){
+            // Handle 5-member circle logic separately
+            $this->handle_5_member_circle($user, $package->id);
+        } else {
+            // Existing logic for 2, 3, 4 downline circles - DO NOT CHANGE
+            $member = Member::where('user_id',$user->referal_id)->first();
+            if($member){
+                $circle = Circle::where('package_id',$package->id)->where('user_id',$member->user_id)->where('status','Active')->first();
+                if($circle){
+                    $this->fill($circle->id,$package->id,$user->id);
+                }else{
+                    $circle = $this->findUplineCircle($user, $package->id);
+                
+                    if($circle){
+                        $condition = 1;
+                        $this->fill_directly($circle->id,$package->id,$user->id,$condition);
+                    }else{
+                        $user->create_circle($package->id);
+                    }
+                }
+            }else{
+                $user->create_circle($package->id);
+            }
+        }
+        
+        // Create timer
+        $timer = new Timer();
+        $timer->user_id = $user->id;
+        $timer->package_id = $package->id;
+        $timer->started_at = now();
+        $timer->save();
+        
+        // Send email
+        $info = array(
+            'package' => $package,
+            'user' => $user
+        );
+            
+        try {
+            Mail::send('email.package_purchased', ['info' => $info], function ($message) use ($user) {
+                $message->to($user->email, $user->name)
+                        ->subject('Embark on a Remarkable Journey with Allons-Z!');
+            });
+
+            if (Mail::failures()) {
+                return response()->json([
+                        'error' => 'Failed to send email'
+                ],422);
+            }
+
+        } catch (\Exception $e) {
+            return response()->json([
+                        'error' => 'Failed to send email'
+            ],422);
+        }
+        
+        return response()->json([
+                'message' => 'Package purchased successfully'
+        ],200);
+    }
     public function verify_razorpay_signature(Request $request)
     {
         $rules = [
             'razorpay_order_id' => 'required',
+            'razorpay_payment_id' => 'required',
+            'razorpay_signature' => 'required',
         ];
     
         $validation = \Validator::make($request->all(), $rules);
@@ -1046,16 +1223,13 @@ class CustomerController extends Controller
         $razorpay_payment_id = $request->razorpay_payment_id;
         $razorpay_signature = $request->razorpay_signature;
         
-        try{
+        try {
             $attributes = array(
                 'razorpay_order_id' => $razorpay_order_id,
                 'razorpay_payment_id' => $razorpay_payment_id,
                 'razorpay_signature' => $razorpay_signature
             );
-            // if(!$request->type){
-                $this->api->utility->verifyPaymentSignature($attributes);
-            // }
-            
+            $this->api->utility->verifyPaymentSignature($attributes);
         }
         catch(SignatureVerificationError $e){
             $success = false;
@@ -1064,7 +1238,8 @@ class CustomerController extends Controller
                     'error' => $error
             ],400);
         }
-        if ($success === true || $request->type == 'manual')
+        
+        if ($success === true)
         {
             $razorpayOrder = $this->api->order->fetch($razorpay_order_id);
             $reciept = $razorpayOrder['receipt'];
@@ -1075,82 +1250,25 @@ class CustomerController extends Controller
             $order->status = 'Verified';
             $order->save();
             
-            $subscription = new Subscription();
-            $subscription->user_id = $user->id;
-            $subscription->package_id = $order->package_id;
-            $subscription->status = 'Active';
-            $subscription->save();
-            
             $package = Package::find($order->package_id);
-            $member = Member::where('user_id',$user->referal_id)->first();
-            if($member){
-                $circle = Circle::where('package_id',$package->id)->where('user_id',$member->user_id)->where('status','Active')->first();
-                if($circle){
-                    $this->fill($circle->id,$package->id,$user->id);
-                }else{
-                    $circle = $this->findUplineCircle($user, $package->id);
-                
-                    if($circle){
-                        $condition = 1;
-                        $this->fill_directly($circle->id,$package->id,$user->id,$condition);
-                    }else{
-                        $user->create_circle($package->id);
-                    }
-                }
-            }else{
-                $user->create_circle($package->id);
-                
-            }
-            //$user->update_circle_member($package->id,Auth::User()->id);
-            // $user->wallet = $user->wallet + $package->price;
-            // $user->save();
             
+            // Calculate total amount with GST for transaction record
+            $setting = Setting::first();
+            $sgst = (($setting->sgst * $package->price) / 100);
+            $cgst = (($setting->cgst * $package->price) / 100);
+            $total = $sgst + $cgst + $package->price;
+            
+            // Create transaction record for Razorpay payment (no wallet deduction)
             $transaction = new Transaction();
             $transaction->user_id = $user->id;
             $transaction->type = 'Debit';
-            $transaction->reason = $package->name .' Package Purchased';
-            $transaction->amount = $package->price;
-            $transaction->balance = $user->wallet;
+            $transaction->reason = $package->name .' Package Purchased (Razorpay)';
+            $transaction->amount = $total; // Total amount including GST
+            $transaction->balance = $user->wallet; // Wallet balance remains unchanged
             $transaction->save();
-            $referal = $user->referal;
-            // if($referal){
-            //     $this->check_referal($referal->id,$package->id,Auth::User()->id);
-            // }
-
-            $timer = new Timer();
-            $timer->user_id = $user->id;
-            $timer->package_id = $package->id;
-            $timer->started_at = now();
-            $timer->save();
-
-            $package = Package::find($order->package_id);
             
-            $info = array(
-                'package' => $package,
-                'user' => $user
-            );
-                
-            try {
-                Mail::send('email.package_purchased', ['info' => $info], function ($message) use ($user) {
-                    $message->to($user->email, $user->name)
-                            ->subject('Embark on a Remarkable Journey with Allons-Z!');
-                });
-
-                if (Mail::failures()) {
-                    return response()->json([
-                            'error' => 'Failed to send email'
-                    ],422);
-                }
-
-            } catch (\Exception $e) {
-                return response()->json([
-                            'error' => 'Failed to send email'
-                ],422);
-            }
-            
-            return response()->json([
-                    'message' => 'Package purchased successfully'
-            ],200);
+            // Complete the purchase using helper method
+            return $this->complete_package_purchase($user, $package, $order);
 
         }
         else
@@ -1185,24 +1303,32 @@ class CustomerController extends Controller
 
             
             $package = Package::find($order->package_id);
-            $member = Member::where('user_id',$user->referal_id)->first();
-            if($member){
-                $circle = Circle::where('package_id',$package->id)->where('user_id',$member->user_id)->where('status','Active')->first();
-                if($circle){
-                    $this->fill($circle->id,$package->id,$user->id);
-                }else{
-                    $circle = $this->findUplineCircle($user, $package->id);
-                
+            
+            // Check if this is a 5-member circle (simple circle)
+            if($package->total_members == 5){
+                // Handle 5-member circle logic separately
+                $this->handle_5_member_circle($user, $package->id);
+            } else {
+                // Existing logic for 2, 3, 4 downline circles - DO NOT CHANGE
+                $member = Member::where('user_id',$user->referal_id)->first();
+                if($member){
+                    $circle = Circle::where('package_id',$package->id)->where('user_id',$member->user_id)->where('status','Active')->first();
                     if($circle){
-                        $condition = 1;
-                        $this->fill_directly($circle->id,$package->id,$user->id,$condition);
+                        $this->fill($circle->id,$package->id,$user->id);
                     }else{
-                        $user->create_circle($package->id);
+                        $circle = $this->findUplineCircle($user, $package->id);
+                    
+                        if($circle){
+                            $condition = 1;
+                            $this->fill_directly($circle->id,$package->id,$user->id,$condition);
+                        }else{
+                            $user->create_circle($package->id);
+                        }
                     }
+                }else{
+                    $user->create_circle($package->id);
+                    
                 }
-            }else{
-                $user->create_circle($package->id);
-                
             }
             $transaction = new Transaction();
             $transaction->user_id = $user->id;
@@ -1437,7 +1563,7 @@ class CustomerController extends Controller
     public function withdraw_history()
     {
         $user = Auth::User();
-        $withdraws = $user->withdraws;
+        $withdraws = $user->withdraws()->orderBy('created_at', 'desc')->get();
         return response()->json([
             'withdraws' => $withdraws
         ],200);
@@ -1599,18 +1725,25 @@ class CustomerController extends Controller
             ], 404);
         }
         
-        $member = Member::where('user_id',$user->referal_id)->orderBy('circle_id','desc')->first();
-        if($member){
-            $circle = Circle::where('package_id',$package->id)->where('user_id',$member->user_id)->with('package')->first();
-            $this->fill($circle->id,$package->id,$user->id);
-        }else{
-            $circle = $this->findUplineCircle($user, $package->id);
-            if($circle){
-                $this->fill_directly($circle->id,$package->id,$user->id);
+        // Check if this is a 5-member circle (simple circle)
+        if($package->total_members == 5){
+            // Handle 5-member circle logic separately
+            $this->handle_5_member_circle($user, $package->id);
+        } else {
+            // Existing logic for 2, 3, 4 downline circles - DO NOT CHANGE
+            $member = Member::where('user_id',$user->referal_id)->orderBy('circle_id','desc')->first();
+            if($member){
+                $circle = Circle::where('package_id',$package->id)->where('user_id',$member->user_id)->with('package')->first();
+                $this->fill($circle->id,$package->id,$user->id);
             }else{
-                $user->create_circle($package->id);
+                $circle = $this->findUplineCircle($user, $package->id);
+                if($circle){
+                    $this->fill_directly($circle->id,$package->id,$user->id);
+                }else{
+                    $user->create_circle($package->id);
+                }
+                    
             }
-                
         }
         
         $subscription = new Subscription();
@@ -2296,7 +2429,7 @@ class CustomerController extends Controller
                                 $circle->user->wallet = $circle->user->wallet + $total_reward;
                                 $circle->user->save();
 
-                                $this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '1st Section completed (Base: ₹'.$base_reward.' + 10% Bonus: ₹'.$bonus.')');
+                                $this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '1st Section completed');
                             }else{
                                 Log::info("reward not given due to downlines purchased count ".$purchsed_packages_count. " of ".$circle->user->username);
                             }
@@ -2381,7 +2514,7 @@ $total_reward = $base_reward + $bonus;
 $circle->user->wallet = $circle->user->wallet + $total_reward;
 $circle->user->save();
 
-$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '2nd Section completed (Base: ₹'.$base_reward.' + 10% Bonus: ₹'.$bonus.')');
+$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '2nd Section completed');
                             }else{
                                 Log::info("reward not given due to downlines purchased count ".$purchsed_packages_count. " of ".$circle->user->username);
                             }
@@ -2476,7 +2609,7 @@ $total_reward = $base_reward + $bonus;
 $circle->user->wallet = $circle->user->wallet + $total_reward;
 $circle->user->save();
 
-$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '1st Section completed (Base: ₹'.$base_reward.' + 10% Bonus: ₹'.$bonus.')');
+$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '1st Section completed');
                             }else{
                                 // Log::info("reward not given due to downlines purchased count ".$purchsed_packages_count. " of ".$circle->user->username);
                             }
@@ -2568,7 +2701,7 @@ $total_reward = $base_reward + $bonus;
 $circle->user->wallet = $circle->user->wallet + $total_reward;
 $circle->user->save();
 
-$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '2nd Section completed (Base: ₹'.$base_reward.' + 10% Bonus: ₹'.$bonus.')');
+$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '2nd Section completed');
                             }else{
                                 // Log::info("reward not given due to downlines purchased count ".$purchsed_packages_count. " of ".$circle->user->username);
                             }
@@ -2661,7 +2794,7 @@ $total_reward = $base_reward + $bonus;
 $circle->user->wallet = $circle->user->wallet + $total_reward;
 $circle->user->save();
 
-$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '3rd Section completed (Base: ₹'.$base_reward.' + 10% Bonus: ₹'.$bonus.')');
+$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '3rd Section completed');
                             }else{
                                 // Log::info("reward not given due to downlines purchased count ".$purchsed_packages_count. " of ".$circle->user->username);
                             }
@@ -2762,7 +2895,7 @@ $total_reward = $base_reward + $bonus;
 $circle->user->wallet = $circle->user->wallet + $total_reward;
 $circle->user->save();
 
-$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '1st Section completed (Base: ₹'.$base_reward.' + 10% Bonus: ₹'.$bonus.')');
+$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '1st Section completed');
                             }else{
                                 // Log::info("reward not given due to downlines purchased count ".$purchsed_packages_count. " of ".$circle->user->username);
                             }
@@ -2859,7 +2992,7 @@ $total_reward = $base_reward + $bonus;
 $circle->user->wallet = $circle->user->wallet + $total_reward;
 $circle->user->save();
 
-$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '2nd Section completed (Base: ₹'.$base_reward.' + 10% Bonus: ₹'.$bonus.')');
+$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '2nd Section completed');
                             }else{
                                 // Log::info("reward not given due to downlines purchased count ".$purchsed_packages_count. " of ".$circle->user->username);
                             }
@@ -2957,7 +3090,7 @@ $total_reward = $base_reward + $bonus;
 $circle->user->wallet = $circle->user->wallet + $total_reward;
 $circle->user->save();
 
-$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '3rd Section completed (Base: ₹'.$base_reward.' + 10% Bonus: ₹'.$bonus.')');
+$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '3rd Section completed');
                             }else{
                                 // Log::info("reward not given due to downlines purchased count ".$purchsed_packages_count. " of ".$circle->user->username);
                             }
@@ -3055,7 +3188,7 @@ $total_reward = $base_reward + $bonus;
 $circle->user->wallet = $circle->user->wallet + $total_reward;
 $circle->user->save();
 
-$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '4th Section completed (Base: ₹'.$base_reward.' + 10% Bonus: ₹'.$bonus.')');
+$this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->user->wallet, '4th Section completed');
                             }else{
                                 // Log::info("reward not given due to downlines purchased count ".$purchsed_packages_count. " of ".$circle->user->username);
                             }
@@ -3072,6 +3205,12 @@ $this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->us
         if (!$package) {
             Log::info('No Package Found');
         }
+        
+        // Skip 5-member circles - they have their own completion logic
+        if($package->total_members == 5){
+            return; // 5-member circles are handled by check_5_member_circle_completion
+        }
+        
         $max_downlines = $package->max_downlines;
         switch ($max_downlines) {
             case 2:
@@ -3215,6 +3354,311 @@ $this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->us
             $randomString .= $characters[rand(0, $charactersLength - 1)];
         }
         return $randomString;
+    }
+
+    /**
+     * Handle 5-member circle logic (Simple Circle)
+     * User goes directly to position 5 after package purchase
+     * Only direct referrals of the user (position 5) fill positions 1-4
+     * IMPORTANT: Every user gets their OWN circle - no upliners/downliners involved
+     */
+    private function handle_5_member_circle($user, $package_id)
+    {
+        $package = Package::find($package_id);
+        
+        // Step 1: ALWAYS create or get user's own 5-member circle and place user in position 5
+        // Every user gets their own circle - this is the key difference from other circle types
+        $existing_circle = Circle::where('user_id', $user->id)
+            ->where('package_id', $package_id)
+            ->where('status', 'Active')
+            ->first();
+        
+        if(!$existing_circle){
+            // Create new circle for this user
+            $user->create_5_member_circle($package_id);
+            $existing_circle = Circle::where('user_id', $user->id)
+                ->where('package_id', $package_id)
+                ->where('status', 'Active')
+                ->orderBy('id', 'desc')
+                ->first();
+        }
+        
+        // Place user in position 5 of their own circle
+        $position_5 = Member::where('circle_id', $existing_circle->id)
+            ->where('position', 5)
+            ->first();
+        
+        if($position_5 && $position_5->status == 'Empty'){
+            $position_5->user_id = $user->id;
+            $position_5->status = 'Occupied';
+            $position_5->save();
+        }
+        
+        // Step 2: If this user is a direct referral of someone with a 5-member circle,
+        // fill positions 1-4 of that upline's circle (but user still has their own circle)
+        if($user->referal_id){
+            $upline = User::find($user->referal_id);
+            if($upline){
+                // Check if upline has an active 5-member circle for this package
+                $upline_circle = Circle::where('user_id', $upline->id)
+                    ->where('package_id', $package_id)
+                    ->where('status', 'Active')
+                    ->first();
+                
+                if($upline_circle){
+                    // Check if position 5 is occupied by upline
+                    $position_5_upline = Member::where('circle_id', $upline_circle->id)
+                        ->where('position', 5)
+                        ->where('user_id', $upline->id)
+                        ->where('status', 'Occupied')
+                        ->first();
+                    
+                    if($position_5_upline){
+                        // Upline has a 5-member circle, fill positions 1-4 of upline's circle
+                        // This user will also have their own circle (created above)
+                        $this->fill_5_member_circle($upline_circle->id, $package_id, $user->id);
+                    }
+                }
+            }
+        }
+        
+        // Step 3: Check if user's existing direct referrals can fill positions 1-4 of this user's circle
+        // This handles the case where user already had referrals before purchasing
+        $this->fill_existing_direct_referrals_5_member_circle($existing_circle->id, $package_id, $user->id);
+    }
+    
+    /**
+     * Fill 5-member circle with existing direct referrals
+     * Called after circle owner purchases to fill with existing referrals
+     */
+    private function fill_existing_direct_referrals_5_member_circle($circle_id, $package_id, $circle_owner_id)
+    {
+        $circle = Circle::find($circle_id);
+        $circle_owner = User::find($circle_owner_id);
+        $package = Package::find($package_id);
+        
+        if(!$circle || !$circle_owner || !$package){
+            return;
+        }
+        
+        // Get all direct referrals of the circle owner who have purchased this package
+        $direct_referrals = User::where('referal_id', $circle_owner_id)
+            ->whereHas('subscriptions', function($query) use ($package_id) {
+                $query->where('subscriptions.package_id', $package_id)
+                      ->where('subscriptions.status', 'Active');
+            })
+            ->get();
+        
+        // Get empty positions 1-4
+        $empty_positions = Member::where('circle_id', $circle_id)
+            ->whereIn('position', [1, 2, 3, 4])
+            ->where('status', 'Empty')
+            ->orderBy('position', 'asc')
+            ->get();
+        
+        // Fill positions with direct referrals
+        $position_index = 0;
+        foreach($direct_referrals as $referral){
+            // Check if referral is already in this circle
+            $existing_member = Member::where('circle_id', $circle_id)
+                ->where('user_id', $referral->id)
+                ->first();
+            
+            if($existing_member){
+                continue; // Skip if already in circle
+            }
+            
+            if($position_index < count($empty_positions)){
+                $position = $empty_positions[$position_index];
+                $position->user_id = $referral->id;
+                $position->status = 'Occupied';
+                $position->save();
+                
+                // Give reward after each position is filled
+                $this->give_5_member_circle_reward($circle_id, $package_id, $position->position);
+                
+                $position_index++;
+            }
+        }
+        
+        // Check if circle is completed
+        $this->check_5_member_circle_completion($circle_id, $package_id);
+    }
+    
+    /**
+     * Fill 5-member circle with direct referrals only
+     * Only users directly referred by the circle owner (position 5) can fill positions 1-4
+     * This is called when a direct referral purchases the package
+     */
+    private function fill_5_member_circle($circle_id, $package_id, $purchasing_user_id)
+    {
+        $circle = Circle::find($circle_id);
+        $circle_owner = User::find($circle->user_id); // User in position 5
+        $package = Package::find($package_id);
+        $purchasing_user = User::find($purchasing_user_id);
+        
+        if(!$circle || !$circle_owner || !$package || !$purchasing_user){
+            return;
+        }
+        
+        // Verify that purchasing user is a direct referral of circle owner
+        if($purchasing_user->referal_id != $circle_owner->id){
+            return; // Not a direct referral, don't fill
+        }
+        
+        // Verify that purchasing user has active subscription for this package
+        $subscription = Subscription::where('user_id', $purchasing_user_id)
+            ->where('package_id', $package_id)
+            ->where('status', 'Active')
+            ->first();
+        
+        if(!$subscription){
+            return; // User doesn't have active subscription
+        }
+        
+        // Check if this user is already in a position in this circle
+        $existing_member = Member::where('circle_id', $circle_id)
+            ->where('user_id', $purchasing_user_id)
+            ->first();
+        
+        if($existing_member){
+            return; // User already in this circle
+        }
+        
+        // Get first empty position (1-4)
+        $empty_position = Member::where('circle_id', $circle_id)
+            ->whereIn('position', [1, 2, 3, 4])
+            ->where('status', 'Empty')
+            ->orderBy('position', 'asc')
+            ->first();
+        
+        if($empty_position){
+            // Fill the position
+            $empty_position->user_id = $purchasing_user_id;
+            $empty_position->status = 'Occupied';
+            $empty_position->save();
+            
+            // Give reward after each position is filled
+            $this->give_5_member_circle_reward($circle_id, $package_id, $empty_position->position);
+            
+            // Check if circle is completed
+            $this->check_5_member_circle_completion($circle_id, $package_id);
+        }
+    }
+    
+    /**
+     * Give reward after each position is filled in 5-member circle
+     */
+    private function give_5_member_circle_reward($circle_id, $package_id, $position)
+    {
+        $circle = Circle::find($circle_id);
+        $package = Package::find($package_id);
+        
+        if(!$circle || !$package){
+            return;
+        }
+        
+        $circle_owner = $circle->user; // User in position 5
+        
+        // Calculate reward: Full reward_amount + 10% bonus for each position filled
+        $base_reward = $package->reward_amount; // Full reward amount (e.g., 200)
+        
+        // Add 10% bonus on top of base reward
+        $bonus = ($base_reward * 10) / 100; // 10% bonus (e.g., 20)
+        $final_reward = $base_reward + $bonus; // Total reward (e.g., 200 + 20 = 220)
+        
+        // Add to not_withdraw_amount (5-member circle rewards are not withdrawable)
+        $circle_owner->not_withdraw_amount = ($circle_owner->not_withdraw_amount ?? 0) + $final_reward;
+        $circle_owner->save();
+        
+        // Calculate total balance (wallet + not_withdraw_amount) for transaction record
+        $total_balance = ($circle_owner->wallet ?? 0) + ($circle_owner->not_withdraw_amount ?? 0);
+        
+        // Create transaction (show normally, but amount is in not_withdraw_amount)
+        // Simple description without breakdown details
+        $this->create_transaction(
+            $circle_owner->id, 
+            'Credit', 
+            $final_reward, 
+            $total_balance, 
+            "5-Member Circle Position {$position} filled"
+        );
+        
+        // Create circle reward record
+        $circle_reward = new CircleReward();
+        $circle_reward->user_id = $circle_owner->id;
+        $circle_reward->circle_id = $circle_id;
+        $circle_reward->amount = $base_reward; // Store base reward
+        $circle_reward->section = $position;
+        $circle_reward->desc = "Position {$position} filled in 5-Member Circle";
+        $circle_reward->status = 'Success';
+        $circle_reward->save();
+    }
+    
+    /**
+     * Check if 5-member circle is completed
+     * If completed, mark as completed and show message (don't renew)
+     */
+    private function check_5_member_circle_completion($circle_id, $package_id)
+    {
+        $circle = Circle::find($circle_id);
+        $package = Package::find($package_id);
+        
+        if(!$circle || !$package){
+            return;
+        }
+        
+        $occupied_count = Member::where('circle_id', $circle_id)
+            ->where('status', 'Occupied')
+            ->count();
+        
+        if($occupied_count == 5){
+            // Circle is completed
+            $circle->status = 'Completed';
+            $circle->save();
+            
+            // Don't renew - just mark as completed
+            // The message will be shown in the frontend when checking circle status
+            Log::info("5-Member Circle {$circle_id} completed for user {$circle->user_id}. No renewal.");
+        }
+    }
+
+    /**
+     * Get user details by referral code
+     * 
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function get_user_by_referral(Request $request)
+    {
+        $rules = [
+            'referal_code' => 'required|string|exists:users,referal_code',
+        ];
+        
+        $validation = \Validator::make($request->all(), $rules);
+        if ($validation->fails()) {
+            return response()->json([
+                'error' => $validation->errors()->first()
+            ], 422);
+        }
+
+        $user = User::where('referal_code', $request->referal_code)
+            ->with(['country', 'state', 'district', 'mandal'])
+            ->first();
+
+        if (!$user) {
+            return response()->json([
+                'error' => 'User not found with this referral code'
+            ], 404);
+        }
+
+        // Get referal information if exists
+        $user->referal_id = $user->referal ? $user->referal->referal_code : 'N/A';
+
+        return response()->json([
+            'user' => $user,
+            'message' => 'User details retrieved successfully'
+        ], 200);
     }
 
     

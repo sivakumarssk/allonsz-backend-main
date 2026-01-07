@@ -54,7 +54,7 @@
                     <th>S No</th>
                     <th>Name</th>
                     <th>Price</th>
-                    <th>Max DownLines</th>
+                    <th>Circle Type</th>
                     <th>Total Members</th>
                     <th>Reward Amount</th>
                     <!-- <th>Action</th> -->
@@ -69,13 +69,19 @@
                     <td>{{$i}}</td>
                     <td>{{$package->name}}</td>
                     <td>{{$package->price}}</td>
-                    <td>{{$package->max_downlines}}</td>
+                    <td>
+                        @if($package->total_members == 5)
+                            <span class="badge badge-info">5-Member Simple Circle</span>
+                        @else
+                            {{$package->max_downlines}} Downlines
+                        @endif
+                    </td>
                     <td>{{$package->total_members}}</td>
                     <td>{{$package->reward_amount}}</td>
                     <td>
                       <a href="{{route('package.show',$package->id)}}" target="_blank"  class="btn btn-sm btn-warning"><i class="fa fa-eye"></i></a>
                       <button class="btn btn-sm btn-primary" data-toggle="modal" data-target="#addModal" data-id="{{$package->id}}" data-name="{{$package->name}}" data-price="{{$package->price}}" 
-                      data-max_downlines="{{$package->max_downlines}}" data-total_members="{{$package->total_members}}" data-reward_amount="{{$package->reward_amount}}"><i class="fa fa-edit"></i></button>
+                      data-max_downlines="{{$package->max_downlines ?? ''}}" data-total_members="{{$package->total_members}}" data-reward_amount="{{$package->reward_amount}}"><i class="fa fa-edit"></i></button>
                       <!--@if($package->deleted_at)-->
                       <!--<button class="btn btn-sm btn-success" data-toggle="modal" data-target="#deleteModal" data-id="{{$package->id}}" data-action="restore"><i class="fa fa-undo"></i></button>-->
                       <!--@else-->
@@ -128,13 +134,14 @@
             onkeypress="return event.charCode >= 48 && event.charCode <= 57" required>
           </div>
           <div class="form-group">
-            <label for="max_downlines" class="col-form-label">Max Downlines:</label>
-            <select name="max_downlines" class="form-control" id="max_downlines" placeholder="Max Downlines" required>
-                <option value="2">2</option>
-                <option value="3">3</option>
-                <option value="4">4</option>
+            <label for="max_downlines" class="col-form-label">Circle Type:</label>
+            <select name="max_downlines" class="form-control" id="max_downlines" placeholder="Circle Type" required>
+                <option value="2">2 Downlines (7 Members)</option>
+                <option value="3">3 Downlines (13 Members)</option>
+                <option value="4">4 Downlines (21 Members)</option>
+                <option value="5">5-Member Simple Circle</option>
             </select>
-            <input type="hidden" name="max_downlines_2" class="form-control" id="max_downlines_2" placeholder="Max downlines" required>
+            <input type="hidden" name="max_downlines_2" class="form-control" id="max_downlines_2" placeholder="Max downlines">
           </div>
           <div class="form-group">
             <label for="total_members" class="col-form-label">Total Members:</label>
@@ -227,11 +234,24 @@
       $('#edit-id').val(button.data('id'));
       $('#name').val(button.data('name'));
       $('#price').val(button.data('price'));
-      $('#max_downlines').val(button.data('max_downlines'));
-      $('#max_downlines_2').val(button.data('max_downlines'));
-      $('#total_members').val(button.data('total_members'));
-      $('#total_members_2').val(button.data('total_members'));
+      
+      // Handle 5-member circles (max_downlines might be null)
+      var totalMembers = button.data('total_members');
+      var maxDownlines = button.data('max_downlines');
+      
+      if(totalMembers == 5) {
+        // 5-Member Simple Circle
+        $('#max_downlines').val(5);
+        $('#max_downlines_2').val('');
+      } else {
+        $('#max_downlines').val(maxDownlines);
+        $('#max_downlines_2').val(maxDownlines);
+      }
+      
+      $('#total_members').val(totalMembers);
+      $('#total_members_2').val(totalMembers);
       $('#reward_amount').val(button.data('reward_amount'));
+      
       if(button.data('id') > 0){
           $('#max_downlines').attr('disabled',true);
           $(".modal-title").text('Update Package');
@@ -271,6 +291,12 @@
             $('#total_members').val(21);
             $('#total_members_2').val(21);
             $('#max_downlines_2').val(4);
+        }
+        if(max_downline == 5){
+            // 5-Member Simple Circle
+            $('#total_members').val(5);
+            $('#total_members_2').val(5);
+            $('#max_downlines_2').val(''); // Set to empty/null for 5-member circles
         }
     });
 

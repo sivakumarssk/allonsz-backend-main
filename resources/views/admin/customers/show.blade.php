@@ -55,7 +55,13 @@
                     <b>Gender</b> <a class="float-right">{{$customer->gender}}</a>
                   </li>
                   <li class="list-group-item">
-                    <b>Wallet</b> <a class="float-right">{{$customer->wallet}}</a>
+                    <b>Withdrawable Wallet</b> <a class="float-right">₹{{number_format($customer->wallet ?? 0, 2)}}</a>
+                  </li>
+                  <li class="list-group-item">
+                    <b>Non-Withdrawable Amount</b> <a class="float-right">₹{{number_format($customer->not_withdraw_amount ?? 0, 2)}}</a>
+                  </li>
+                  <li class="list-group-item">
+                    <b>Total Wallet</b> <a class="float-right"><strong>₹{{number_format(($customer->wallet ?? 0) + ($customer->not_withdraw_amount ?? 0), 2)}}</strong></a>
                   </li>
                   <li class="list-group-item">
                     <b>Referal</b> <a class="float-right">{{$customer->referal_code}}</a>
@@ -267,19 +273,53 @@
                                 <center>
                                     
                                     <?php 
-                                        if($circle->package->max_downlines == 2){
-                                            $circle_container = 'two-circle-container';
-                                        }
-                                        if($circle->package->max_downlines == 3){
-                                            $circle_container = 'three-circle-container';
-                                        }
+                                        // Check if this is a 5-member circle (simple circle)
+                                        $is_5_member = $circle->package->total_members == 5;
                                         
-                                        if($circle->package->max_downlines == 4){
+                                        if($is_5_member){
+                                            $circle_container = 'five-circle-container';
+                                        } elseif($circle->package->max_downlines == 2){
+                                            $circle_container = 'two-circle-container';
+                                        } elseif($circle->package->max_downlines == 3){
+                                            $circle_container = 'three-circle-container';
+                                        } elseif($circle->package->max_downlines == 4){
                                             $circle_container = 'four-circle-container';
+                                        } else {
+                                            $circle_container = 'two-circle-container'; // Default
                                         }
                                     
                                     ?>
+                                    
+                                    @if($is_5_member)
+                                        <!-- 5-Member Circle Display (Simple Circle) -->
+                                        <div class="alert alert-info">
+                                            <strong>5-Member Simple Circle</strong> - User is in Position 5, Direct Referrals fill Positions 1-4
+                                        </div>
+                                        @if($circle->status == 'Completed')
+                                            <div class="alert alert-warning">
+                                                <strong>Circle Completed!</strong> Please update the package.
+                                            </div>
+                                        @endif
+                                    @endif
+                                    
                                     <div class="{{$circle_container}} circle">
+                                    @if($is_5_member)
+                                        <!-- 5-Member Circle Layout (Circular Style) -->
+                                        <div class="five-circle1">
+                                            <div class="base">
+                                                <a href="{{$circle->circle_member(5)->user ? url('show-customer',$circle->circle_member(5)->user->id) : '#'}}" target="_blank">
+                                                    {{$circle->circle_member(5)->user ? $circle->circle_member(5)->user->username : 'Empty-5'}}
+                                                </a>
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="five-circle2">
+                                            <div><a href="{{$circle->circle_member(1)->user ? url('show-customer',$circle->circle_member(1)->user->id) : '#'}}" target="_blank">{{$circle->circle_member(1)->user ? $circle->circle_member(1)->user->username : 'Empty-1'}}</a></div>
+                                            <div><a href="{{$circle->circle_member(2)->user ? url('show-customer',$circle->circle_member(2)->user->id) : '#'}}" target="_blank">{{$circle->circle_member(2)->user ? $circle->circle_member(2)->user->username : 'Empty-2'}}</a></div>
+                                            <div><a href="{{$circle->circle_member(3)->user ? url('show-customer',$circle->circle_member(3)->user->id) : '#'}}" target="_blank">{{$circle->circle_member(3)->user ? $circle->circle_member(3)->user->username : 'Empty-3'}}</a></div>
+                                            <div><a href="{{$circle->circle_member(4)->user ? url('show-customer',$circle->circle_member(4)->user->id) : '#'}}" target="_blank">{{$circle->circle_member(4)->user ? $circle->circle_member(4)->user->username : 'Empty-4'}}</a></div>
+                                        </div>
+                                    @else
                                     @forelse($circle->members as $member)
                                     
                                         @if($circle->package->max_downlines == 2)
@@ -504,9 +544,13 @@
                                         
                                     @empty
                                     @endforelse
+                                    @endif
+                                    
                                     </div>
-                                    <p>Code: #{{$circle->name}}</b>
+                                    <p><strong>Code:</strong> #{{$circle->name}}</p>
                                     <h3>{{$circle->package->name}}</h3>
+                                    <p><strong>Status:</strong> {{$circle->status}}</p>
+                                    @if(!$is_5_member)
                                     <p>Time Left: 
                                     @php
                                         $timer = App\Models\Timer::where('user_id',$customer->id)->where('package_id',$circle->package_id)->first();
@@ -528,13 +572,21 @@
                                         }
                                     @endphp
                                     </p>
+                                    @else
+                                    
+                                    @php
+                                        $filled_positions = $circle->members->where('status', 'Occupied')->count();
+                                        $empty_positions = 5 - $filled_positions;
+                                    @endphp
+                                    <p><strong>Progress:</strong> {{$filled_positions}}/5 positions filled ({{$empty_positions}} remaining)</p>
+                                    @endif
                                     <div class="table-responsive">
                                         <table class="table table-bordered table-striped">
                                             <thead>
                                                <th>S No</th>
                                                <th>Circle</th>
                                                <th>Section</th>
-                                               <th>Amount</th>
+                                               <th>Reward Amount</th>
                                                <th>Desc</th>
                                                <th>Status</th>
                                                <th>Time</th>
@@ -543,12 +595,23 @@
                                                 <?php $i = 0; ?>
                                                 @forelse($customer->circle_rewards($circle->package_id) as $reward)
                                                 @if($reward->user_id == $customer->id)
-                                                <?php $i++; ?>
+                                                <?php 
+                                                    $i++; 
+                                                    $base_reward = $reward->amount;
+                                                    $bonus = ($base_reward * 10) / 100;
+                                                    $total_reward = $base_reward + $bonus;
+                                                ?>
                                                 <tr>
                                                     <td>{{$i}}</td>
                                                     <th>#{{$reward->circle->name}}</th>
                                                     <td>{{$reward->section}}</td>
-                                                    <td>{{$reward->amount}}</td>
+                                                    <td>
+                                                        <strong>Total: ₹{{number_format($total_reward, 2)}}</strong><br>
+                                                        <small style="color: #666;">
+                                                            Base: ₹{{number_format($base_reward, 2)}} + 
+                                                            10% Bonus: ₹{{number_format($bonus, 2)}}
+                                                        </small>
+                                                    </td>
                                                     <td>{{$reward->desc}}</td>
                                                     <td>{{$reward->status}}</td>
                                                     <td>{{$reward->created_at}}</td>
@@ -1517,7 +1580,108 @@
         
     }
 
-
+    /* 5-Member Circle Styles (Simple Circle) - Circular Layout like other circles */
+    .five-circle-container {
+        position: relative;
+        width: 340px;
+        height: 340px;
+    }
+    
+    .five-circle1 {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 120px;
+        height: 120px;
+        background-color: #f5576c;
+        border-radius: 50%;
+        transform: translate(-50%, -50%);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        color: white;
+        z-index: 3;
+        border: 6px solid #ffd700;
+        box-shadow: 0 4px 20px rgba(255,215,0,0.4);
+    }
+    
+    .five-circle2 {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 280px;
+        height: 280px;
+        border-radius: 50%;
+        transform: translate(-50%, -50%);
+        background: conic-gradient(
+          purple 0% 25%,
+        red 25% 50%,
+        green 50% 75%,
+        skyblue 75% 100%
+        );
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        flex-direction: column;
+        color: white;
+        z-index: 2;
+        border: 5px solid white;
+    }
+    
+    .five-circle2::before {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 100%;
+        height: 4px;
+        background-color: white;
+        transform-origin: center;
+        transform: translate(-50%, -50%) rotate(0deg);
+    }
+    
+    .five-circle2::after {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 100%;
+        height: 4px;
+        background-color: white;
+        transform-origin: center;
+        transform: translate(-50%, -50%) rotate(90deg);
+    }
+    
+    .five-circle2 > div {
+        position: absolute;
+        width: 50%;
+        text-align: center;
+        color: white;
+    }
+    
+    .five-circle2 > div:nth-child(1) {
+        top: 5%;
+        right: 25%;
+        transform: rotate(-49deg) translate(-80px, -23px);
+    }
+    
+    .five-circle2 > div:nth-child(2) {
+        right: 5%;
+        bottom: 25%;
+        transform: rotate(52deg) translate(-88px, -82px);
+    }
+    
+    .five-circle2 > div:nth-child(3) {
+        bottom: 5%;
+        left: 25%;
+        transform: rotate(-41deg) translate(78px, 8.8px);
+    }
+    
+    .five-circle2 > div:nth-child(4) {
+        left: 5%;
+        top: 25%;
+        transform: rotate(44deg) translate(71px, 94px);
+    }
 
     
   </style>
