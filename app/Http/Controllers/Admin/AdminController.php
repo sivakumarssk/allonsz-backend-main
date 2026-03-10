@@ -562,11 +562,20 @@ class AdminController extends Controller
         // Handle wallet deduction/refund based on status change
         if($status == 'approved'){
             // Deduct wallet only when approved (from pending status)
-            if($user->wallet >= $withdraw->amount){
-                $user->wallet = $user->wallet - $withdraw->amount;
-                $user->save();
+            if($withdraw->wallet_type === 'combo'){
+                if($user->combo_wallet >= $withdraw->amount){
+                    $user->combo_wallet = $user->combo_wallet - $withdraw->amount;
+                    $user->save();
+                } else {
+                    return redirect()->back()->with('error','User has insufficient combo wallet balance');
+                }
             } else {
-                return redirect()->back()->with('error','User has insufficient wallet balance');
+                if($user->wallet >= $withdraw->amount){
+                    $user->wallet = $user->wallet - $withdraw->amount;
+                    $user->save();
+                } else {
+                    return redirect()->back()->with('error','User has insufficient wallet balance');
+                }
             }
             
             // Clear rejection reason if approving
@@ -580,7 +589,7 @@ class AdminController extends Controller
             $transaction->type = 'Debit';
             $transaction->reason = $reason;
             $transaction->amount = $withdraw->amount;
-            $transaction->balance = $user->wallet;
+            $transaction->balance = $withdraw->wallet_type === 'combo' ? $user->combo_wallet : $user->wallet;
             $transaction->save();
             
         } elseif($status == 'rejected'){

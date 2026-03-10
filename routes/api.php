@@ -51,6 +51,7 @@ use App\Http\Controllers\TruthScreenController;
             Route::post('update-trip',[CustomerController::class,'update_trip']);
             Route::post('upload-trip-photo',[CustomerController::class,'upload_trip_photo']);
             Route::post('withdraw-request',[CustomerController::class,'withdraw_request']);
+            Route::post('combo-withdraw-request',[CustomerController::class,'combo_withdraw_request']);
             Route::get('withdraw-history',[CustomerController::class,'withdraw_history']);
             Route::get('transaction-history',[CustomerController::class,'transaction_history']);
             Route::get('get-add',[CustomerController::class,'get_add']);

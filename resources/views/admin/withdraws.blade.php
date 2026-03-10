@@ -55,6 +55,7 @@
                     <th>Code</th>
                     <th>Name</th>
                     <th>Amount</th>
+                    <th>Wallet Type</th>
                     <th>Transfer Details</th>
                     <th>Status</th>
                     <th>Rejection Reason</th>
@@ -73,6 +74,7 @@
                     <td>{{$withdraw->request_code}}</td>
                     <td><a href="{{url('/show-customer',$withdraw->user_id)}}" target="_blank">{{$withdraw->user->name}}</a></td>
                     <td>{{$withdraw->amount}}</td>
+                    <td>{{$withdraw->wallet_type ?? 'main'}}</td>
                     <td>{{$withdraw->transfer_details}}</td>
                     <td>
                       @if(strtolower($withdraw->status) == 'rejected')

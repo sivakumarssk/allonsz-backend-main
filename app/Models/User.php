@@ -236,6 +236,78 @@ class User extends Authenticatable
         
         return $this->circles;
     }
+
+    public function create_combo_circle($package_id, $section, $cycle = 1, $place_owner = true)
+    {
+        $package = Package::find($package_id);
+        if (!$package || !$package->is_combo) {
+            return null;
+        }
+
+        $circle = new \App\Models\ComboCircle();
+        $circle->code = $this->generateUniqueComboCircleCode();
+        $circle->user_id = $this->id;
+        $circle->package_id = $package->id;
+        $circle->section = $section;
+        $circle->cycle = $cycle;
+        $circle->status = 'Active';
+        $circle->autofill_count = 0; // Initialize autofill count for first auto-fill tracking
+        $circle->save();
+
+        $this->create_combo_circle_members($circle, $place_owner);
+
+        return $circle;
+    }
+
+    private function generateUniqueComboCircleCode()
+    {
+        $characters = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+        do {
+            $code = '';
+            for ($i = 0; $i < 8; $i++) {
+                $code .= $characters[rand(0, strlen($characters) - 1)];
+            }
+        } while (\App\Models\ComboCircle::where('code', $code)->exists());
+
+        return $code;
+    }
+
+    public function create_combo_circle_members($circle, $place_owner = true)
+    {
+        $total_members = $circle->section === 'twentyone' ? 21 : 5;
+        for ($i = 1; $i <= $total_members; $i++) {
+            $member = new \App\Models\ComboMember();
+            $member->combo_circle_id = $circle->id;
+            $member->position = $i;
+            $member->package_id = $circle->package_id;
+            if ($place_owner && $circle->section === 'twentyone' && $i === 1) {
+                $member->user_id = $this->id;
+                $member->status = 'Occupied';
+            }
+            if ($place_owner && $circle->section !== 'twentyone' && $i === 5) {
+                $member->user_id = $this->id;
+                $member->status = 'Occupied';
+            }
+            $member->save();
+        }
+    }
+
+    public function create_combo_package_circles($package_id)
+    {
+        $existing = \App\Models\ComboCircle::where('user_id', $this->id)
+            ->where('package_id', $package_id)
+            ->whereIn('section', ['five_a', 'five_b', 'five_c', 'twentyone'])
+            ->count();
+
+        if ($existing > 0) {
+            return;
+        }
+
+        $this->create_combo_circle($package_id, 'five_a', 1);
+        $this->create_combo_circle($package_id, 'five_b', 1);
+        $this->create_combo_circle($package_id, 'five_c', 1);
+        $this->create_combo_circle($package_id, 'twentyone', 1);
+    }
     
     public function create_circle_members($circle_id)
     {
@@ -1156,6 +1228,16 @@ class User extends Authenticatable
     public function withdraws()
     {
         return $this->hasMany('App\Models\Withdraw');
+    }
+
+    public function combo_circles()
+    {
+        return $this->hasMany('App\Models\ComboCircle');
+    }
+
+    public function combo_members()
+    {
+        return $this->hasMany('App\Models\ComboMember');
     }
     
     private function generateUniqueString($length = 8)

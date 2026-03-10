@@ -663,6 +663,18 @@ class TruthScreenController extends Controller
         
         $user = Auth::User();
         $aadharDetails = json_decode($user->aadhar_details, true);
+        
+        // Check if aadharDetails is a valid array before calling array_key_first
+        if (!is_array($aadharDetails) || empty($aadharDetails)) {
+            $user->aadhar_status = 'Pending';
+            $user->save();
+            abort(response()->json(
+                [
+                    'error' => 'aadhar is not verified',
+                    'redirect' => 'aadhar_screen',
+                ], 422));
+        }
+        
         $firstKey = array_key_first($aadharDetails); // Get the first key dynamically
         if(!$firstKey){
             $user->aadhar_status = 'Pending';

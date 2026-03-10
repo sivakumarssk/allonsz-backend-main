@@ -26,16 +26,40 @@ class PackageController extends Controller
 
     public function store(Request $request)
     {
+        $is_combo = (bool)$request->is_combo;
+
         $rules = [
             'name' => 'required',
             'price' => 'required',
             'total_members' => 'required',
-            'reward_amount' => 'required',
         ];
-        
-        // max_downlines_2 is only required for non-5-member circles
-        if($request->total_members != 5) {
+
+        // reward_amount is only required for non-combo packages
+        if(!$is_combo) {
+            $rules['reward_amount'] = 'required';
+        }
+
+        // max_downlines_2 is only required for non-5-member circles and non-combo packages
+        if($request->total_members != 5 && !$is_combo) {
             $rules['max_downlines_2'] = 'required';
+        }
+
+        if($is_combo){
+            // 5-Member Circle 1 (five_a) rewards
+            $rules['combo_five_a_reward_direct'] = 'required|numeric|min:0';
+            $rules['combo_five_a_reward_autofill'] = 'required|numeric|min:0';
+            $rules['combo_five_a_autorenew_amount'] = 'required|numeric|min:0';
+            // 5-Member Circle 2 (five_b) rewards
+            $rules['combo_five_b_reward_direct'] = 'required|numeric|min:0';
+            $rules['combo_five_b_reward_autofill'] = 'required|numeric|min:0';
+            $rules['combo_five_b_autorenew_amount'] = 'required|numeric|min:0';
+            // 5-Member Circle 3 (five_c) rewards
+            $rules['combo_five_c_reward_direct'] = 'required|numeric|min:0';
+            $rules['combo_five_c_reward_autofill'] = 'required|numeric|min:0';
+            $rules['combo_five_c_autorenew_amount'] = 'required|numeric|min:0';
+            // 21-Member circle rewards
+            $rules['combo_twentyone_reward_amount'] = 'required|numeric|min:0';
+            $rules['combo_twentyone_autorenew_amount'] = 'required|numeric|min:0';
         }
     
         $msg = 'Package Added';
@@ -54,15 +78,46 @@ class PackageController extends Controller
         
         $package->name = $request->name;
         $package->price = $request->price;
+        $package->is_combo = $is_combo;
         // For 5-member circles, max_downlines should be null
         $package->max_downlines = ($request->total_members == 5) ? null : $request->max_downlines_2;
         $package->total_members = $request->total_members;
-        $package->reward_amount = $request->reward_amount;
+        // reward_amount is only set for non-combo packages
+        if(!$is_combo) {
+            $package->reward_amount = $request->reward_amount;
+        } else {
+            $package->reward_amount = 0; // Set to 0 for combo packages
+        }
+
+        if($is_combo){
+            // 5-Member Circle 1 (five_a) rewards
+            $package->combo_five_a_reward_direct = $request->combo_five_a_reward_direct;
+            $package->combo_five_a_reward_autofill = $request->combo_five_a_reward_autofill;
+            $package->combo_five_a_autorenew_amount = $request->combo_five_a_autorenew_amount;
+            // 5-Member Circle 2 (five_b) rewards
+            $package->combo_five_b_reward_direct = $request->combo_five_b_reward_direct;
+            $package->combo_five_b_reward_autofill = $request->combo_five_b_reward_autofill;
+            $package->combo_five_b_autorenew_amount = $request->combo_five_b_autorenew_amount;
+            // 5-Member Circle 3 (five_c) rewards
+            $package->combo_five_c_reward_direct = $request->combo_five_c_reward_direct;
+            $package->combo_five_c_reward_autofill = $request->combo_five_c_reward_autofill;
+            $package->combo_five_c_autorenew_amount = $request->combo_five_c_autorenew_amount;
+            // 21-Member circle rewards
+            $package->combo_twentyone_reward_amount = $request->combo_twentyone_reward_amount;
+            $package->combo_twentyone_autorenew_amount = $request->combo_twentyone_autorenew_amount;
+            // Section names
+            $package->combo_five_a_name = $request->combo_five_a_name ?? null;
+            $package->combo_five_b_name = $request->combo_five_b_name ?? null;
+            $package->combo_five_c_name = $request->combo_five_c_name ?? null;
+            $package->combo_twentyone_name = $request->combo_twentyone_name ?? null;
+        }
         $package->save();
         
+        // Create colors: 36 colors for combo packages (5+5+5+21), otherwise use total_members
         $colors_count = $package->colors->count();
         if($colors_count == 0){
-            for($i = 0; $i < $package->total_members; $i++){
+            $total_colors = $is_combo ? 36 : $package->total_members; // 36 = 5+5+5+21 for combo packages
+            for($i = 0; $i < $total_colors; $i++){
                 $color = new Color();
                 $color->package_id = $package->id;
                 $color->position = $i + 1;
@@ -75,8 +130,10 @@ class PackageController extends Controller
         if (!$request->id) {
             $admin = User::first();
             
-            // Check if this is a 5-member circle
-            if($package->total_members == 5) {
+            // Check if this is a combo package
+            if($package->is_combo) {
+                $admin->create_combo_package_circles($package->id);
+            } elseif($package->total_members == 5) {
                 // Create 5-member circle
                 $admin->create_5_member_circle($package->id);
             } else {
@@ -102,7 +159,9 @@ class PackageController extends Controller
         }
         $colors_count = $package->colors->count();
         if($colors_count == 0){
-            for($i = 0; $i < $package->total_members; $i++){
+            // Create colors: 36 colors for combo packages (5+5+5+21), otherwise use total_members
+            $total_colors = $package->is_combo ? 36 : $package->total_members; // 36 = 5+5+5+21 for combo packages
+            for($i = 0; $i < $total_colors; $i++){
                 $color = new Color();
                 $color->package_id = $package->id;
                 $color->position = $i + 1;

@@ -48,6 +48,29 @@
                   <li class="list-group-item">
                     <b>Total Members</b> <a class="float-right">{{$package->total_members}}</a>
                   </li>
+                  @if($package->is_combo)
+                  <li class="list-group-item">
+                    <b>Combo Type</b> <a class="float-right">2x5 + 21</a>
+                  </li>
+                  <li class="list-group-item">
+                    <b>5-Member Direct Reward</b> <a class="float-right">{{$package->combo_five_reward_direct}}</a>
+                  </li>
+                  <li class="list-group-item">
+                    <b>5-Member First Autofill Reward</b> <a class="float-right">{{$package->combo_five_reward_first_autofill}}</a>
+                  </li>
+                  <li class="list-group-item">
+                    <b>5-Member Other Autofill Reward</b> <a class="float-right">{{$package->combo_five_reward_other_autofill}}</a>
+                  </li>
+                  <li class="list-group-item">
+                    <b>5-Member Auto-Renew</b> <a class="float-right">{{$package->combo_five_autorenew_amount}}</a>
+                  </li>
+                  <li class="list-group-item">
+                    <b>21-Member Reward</b> <a class="float-right">{{$package->combo_twentyone_reward_amount}}</a>
+                  </li>
+                  <li class="list-group-item">
+                    <b>21-Member Auto-Renew</b> <a class="float-right">{{$package->combo_twentyone_autorenew_amount}}</a>
+                  </li>
+                  @endif
                 </ul>
               </div>
               <!-- /.card-body -->
