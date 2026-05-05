@@ -26,6 +26,7 @@ use App\Models\Transaction;
 use App\Models\Trip;
 use App\Models\User;
 use App\Models\Withdraw;
+use App\Models\ReferralHistory;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use \Hash;
@@ -397,6 +398,30 @@ class AdminController extends Controller
         ],200);
     }
 
+    public function toggle_block_user(Request $request)
+    {
+        $user = User::where('id', $request->id)->withTrashed()->first();
+        if (!$user) {
+            return response()->json(['error' => 'User not found'], 404);
+        }
+        $user->is_blocked = !$user->is_blocked;
+        $user->block_reason = $request->reason ?? null;
+        $user->save();
+        return response()->json(['msg' => 'success', 'is_blocked' => $user->is_blocked], 200);
+    }
+
+    public function toggle_freeze_wallet(Request $request)
+    {
+        $user = User::where('id', $request->id)->withTrashed()->first();
+        if (!$user) {
+            return response()->json(['error' => 'User not found'], 404);
+        }
+        $user->wallet_frozen = !$user->wallet_frozen;
+        $user->freeze_reason = $request->reason ?? null;
+        $user->save();
+        return response()->json(['msg' => 'success', 'wallet_frozen' => $user->wallet_frozen], 200);
+    }
+
     public function logout(Request $request)
     {
         Auth::logout();
@@ -420,7 +445,10 @@ class AdminController extends Controller
         if(!$customer){
             return redirect('/customers');
         }
-        return view('admin.customers.show',compact('customer','tours'));
+        $referral_histories = ReferralHistory::where('user_id', $id)
+            ->orderBy('created_at', 'desc')
+            ->get();
+        return view('admin.customers.show', compact('customer', 'tours', 'referral_histories'));
     }
 
     public function store_user(Request $request)
@@ -506,6 +534,52 @@ class AdminController extends Controller
         return response()->json([
             'msg' => 'success'
         ],200);
+    }
+
+    public function change_upline(Request $request)
+    {
+        $rules = [
+            'user_id'      => 'required|exists:users,id',
+            'referal_code' => 'required|exists:users,referal_code',
+            'reason'       => 'nullable|string|max:500',
+        ];
+
+        $validation = Validator::make($request->all(), $rules);
+        if ($validation->fails()) {
+            return redirect()->back()->with('error', $validation->errors()->first());
+        }
+
+        $user = User::find($request->user_id);
+        $new_upline = User::where('referal_code', $request->referal_code)->first();
+
+        if ($new_upline->id == $user->id) {
+            return redirect()->back()->with('error', 'User cannot be their own upliner.');
+        }
+
+        // Prevent circular reference: new upline must not be a downliner of this user
+        $check = $new_upline;
+        while ($check && $check->referal_id) {
+            if ($check->referal_id == $user->id) {
+                return redirect()->back()->with('error', 'Cannot set a downliner as the upliner (circular reference).');
+            }
+            $check = User::find($check->referal_id);
+        }
+
+        // Save history before changing
+        ReferralHistory::create([
+            'user_id'          => $user->id,
+            'old_referal_id'   => $user->referal_id,
+            'old_referal_code' => $user->referal ? $user->referal->referal_code : null,
+            'new_referal_id'   => $new_upline->id,
+            'new_referal_code' => $new_upline->referal_code,
+            'changed_by'       => auth()->id(),
+            'reason'           => $request->reason,
+        ]);
+
+        $user->referal_id = $new_upline->id;
+        $user->save();
+
+        return redirect()->back()->with('success', 'Upliner changed successfully.');
     }
 
     public function customer_timers()

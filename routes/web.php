@@ -65,6 +65,9 @@ Route::middleware('admin')->group(function () {
 	Route::post('/delete-user',[AdminController::class, 'delete_user']);
 	Route::post('/update-user-status',[AdminController::class, 'update_user_status']);
 	Route::post('/update-document-status',[AdminController::class, 'update_document_status']);
+	Route::post('/change-upline',[AdminController::class, 'change_upline']);
+	Route::post('/toggle-block-user',[AdminController::class, 'toggle_block_user']);
+	Route::post('/toggle-freeze-wallet',[AdminController::class, 'toggle_freeze_wallet']);
     Route::get('/customer-timers',[AdminController::class, 'customer_timers']);
     Route::get('/expiring-timers',[AdminController::class, 'users_with_expiring_timers']);
 	Route::get('/withdraws',[AdminController::class, 'withdraws']);

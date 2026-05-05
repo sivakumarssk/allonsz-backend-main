@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -n \"protected $fillable\\\\|protected $table\\\\|protected $dates\" /c/xampp/htdocs/allonsz-backend-main/app/Models/User.php)"
+    ]
+  }
+}

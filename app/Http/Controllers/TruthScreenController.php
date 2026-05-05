@@ -152,10 +152,18 @@ class TruthScreenController extends Controller
         }
         
         $user = User::where('id','!=',Auth::User()->id)->where('aadhar_no',$request->aadhar_no)->where('aadhar_status','Verified')->first();
-        
+
         if($user){
             return response()->json([
                 'error' => 'This aadhar is already taken'
+            ], 422);
+        }
+
+        // Block if this aadhar belongs to a blocked user
+        $blocked = User::withTrashed()->where('aadhar_no', $request->aadhar_no)->where('is_blocked', true)->where('id', '!=', Auth::User()->id)->first();
+        if($blocked){
+            return response()->json([
+                'error' => 'This Aadhar number is not allowed. Please contact support.'
             ], 422);
         }
         // Replace these with your credentials or retrieve from the .env file
@@ -469,6 +477,15 @@ class TruthScreenController extends Controller
                 'error' => 'This pan is already taken'
             ], 422);
         }
+
+        // Block if this PAN belongs to a blocked user
+        $blocked = User::withTrashed()->where('pan_no', $request->pan_no)->where('is_blocked', true)->where('id', '!=', Auth::User()->id)->first();
+        if($blocked){
+            return response()->json([
+                'error' => 'This PAN number is not allowed. Please contact support.'
+            ], 422);
+        }
+
         $user = Auth::User();
         $aadharDetails = json_decode($user->aadhar_details, true);
         $firstKey = array_key_first($aadharDetails); // Get the first key dynamically

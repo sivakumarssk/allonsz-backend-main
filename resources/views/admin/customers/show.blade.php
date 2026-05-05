@@ -74,9 +74,49 @@
                   </li>
                   <li class="list-group-item">
                     <b>Document Status</b> <a class="float-right">
-                        <input type="checkbox" name="document-checkbox" class="document-status" data-id="{{$customer->id}}" data-bootstrap-switch data-on-text="Verified" 
+                        <input type="checkbox" name="document-checkbox" class="document-status" data-id="{{$customer->id}}" data-bootstrap-switch data-on-text="Verified"
                         data-off-text="Pending" {{$customer->email_sent_document_status == 'Verified' ? 'checked' : ''}}>
                     </a>
+                  </li>
+                  <li class="list-group-item">
+                    <b>Account Block</b>
+                    <span class="float-right">
+                        <span id="block-badge" class="badge {{ $customer->is_blocked ? 'badge-danger' : 'badge-success' }}">
+                            {{ $customer->is_blocked ? 'Blocked' : 'Active' }}
+                        </span>
+                    </span>
+                  </li>
+                  @if($customer->block_reason)
+                  <li class="list-group-item">
+                    <b>Block Reason</b> <span class="float-right text-danger small">{{$customer->block_reason}}</span>
+                  </li>
+                  @endif
+                  <li class="list-group-item">
+                    <b>Wallet Status</b>
+                    <span class="float-right">
+                        <span id="freeze-badge" class="badge {{ $customer->wallet_frozen ? 'badge-warning' : 'badge-success' }}">
+                            {{ $customer->wallet_frozen ? 'Frozen' : 'Active' }}
+                        </span>
+                    </span>
+                  </li>
+                  @if($customer->freeze_reason)
+                  <li class="list-group-item">
+                    <b>Freeze Reason</b> <span class="float-right text-warning small">{{$customer->freeze_reason}}</span>
+                  </li>
+                  @endif
+                  <li class="list-group-item" style="border-top:2px solid #dee2e6; padding-top:12px;">
+                    <div class="d-flex" style="gap:8px;">
+                        <button class="btn btn-sm {{ $customer->is_blocked ? 'btn-success' : 'btn-danger' }} btn-block-user w-50"
+                            data-id="{{$customer->id}}" data-blocked="{{$customer->is_blocked ? 1 : 0}}">
+                            <i class="fas {{ $customer->is_blocked ? 'fa-unlock' : 'fa-ban' }}"></i>
+                            {{ $customer->is_blocked ? 'Unblock' : 'Block Account' }}
+                        </button>
+                        <button class="btn btn-sm {{ $customer->wallet_frozen ? 'btn-success' : 'btn-warning' }} btn-freeze-wallet w-50"
+                            data-id="{{$customer->id}}" data-frozen="{{$customer->wallet_frozen ? 1 : 0}}">
+                            <i class="fas {{ $customer->wallet_frozen ? 'fa-fire' : 'fa-snowflake' }}"></i>
+                            {{ $customer->wallet_frozen ? 'Unfreeze' : 'Freeze Wallet' }}
+                        </button>
+                    </div>
                   </li>
                 </ul>
               </div>
@@ -96,6 +136,7 @@
                   <li class="nav-item"><a class="nav-link" href="#circles" data-toggle="tab">Circles</a></li>
                   <li class="nav-item"><a class="nav-link" href="#trips" data-toggle="tab">Trips</a></li>
                   <li class="nav-item"><a class="nav-link" href="#transactions" data-toggle="tab">Transactions</a></li>
+                  <li class="nav-item"><a class="nav-link" href="#change-upline" data-toggle="tab">Change Upliner</a></li>
                 </ul>
               </div><!-- /.card-header -->
               <div class="card-body">
@@ -706,6 +747,91 @@
                     </div>
                   </div>
                   
+                  <!-- Change Upliner Tab -->
+                  <div class="tab-pane" id="change-upline">
+
+                    @if(session('success'))
+                      <div class="alert alert-success">{{ session('success') }}</div>
+                    @endif
+                    @if(session('error'))
+                      <div class="alert alert-danger">{{ session('error') }}</div>
+                    @endif
+
+                    <div class="card card-info">
+                      <div class="card-header"><h3 class="card-title">Change Upliner</h3></div>
+                      <div class="card-body">
+                        <form method="POST" action="{{ url('change-upline') }}">
+                          @csrf
+                          <input type="hidden" name="user_id" value="{{ $customer->id }}">
+                          <div class="form-group">
+                            <label>Current Upliner</label>
+                            <input type="text" class="form-control" value="{{ $customer->referal ? $customer->referal->first_name.' '.$customer->referal->last_name.' ('.$customer->referal->referal_code.')' : 'None' }}" readonly>
+                          </div>
+                          <div class="form-group">
+                            <label>New Upliner Referral Code <span class="text-danger">*</span></label>
+                            <input type="text" name="referal_code" class="form-control" placeholder="Enter new upliner's referral code" required>
+                          </div>
+                          <div class="form-group">
+                            <label>Reason (optional)</label>
+                            <textarea name="reason" class="form-control" rows="2" placeholder="Reason for changing upliner"></textarea>
+                          </div>
+                          <button type="submit" class="btn btn-info">Change Upliner</button>
+                        </form>
+                      </div>
+                    </div>
+
+                    <!-- Referral History -->
+                    <div class="card card-secondary mt-3">
+                      <div class="card-header"><h3 class="card-title">Upliner Change History</h3></div>
+                      <div class="card-body p-0">
+                        <table class="table table-sm table-striped">
+                          <thead>
+                            <tr>
+                              <th>#</th>
+                              <th>Old Upliner</th>
+                              <th>New Upliner</th>
+                              <th>Reason</th>
+                              <th>Changed At</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            @forelse($referral_histories as $i => $history)
+                            <tr>
+                              <td>{{ $i + 1 }}</td>
+                              <td>
+                                @if($history->old_referal)
+                                  <a href="{{ url('show-customer', $history->old_referal_id) }}" target="_blank">
+                                    {{ $history->old_referal->first_name }} {{ $history->old_referal->last_name }}
+                                  </a>
+                                  <br><small class="text-muted">{{ $history->old_referal_code }}</small>
+                                @else
+                                  <span class="text-muted">{{ $history->old_referal_code ?? 'None' }}</span>
+                                @endif
+                              </td>
+                              <td>
+                                @if($history->new_referal)
+                                  <a href="{{ url('show-customer', $history->new_referal_id) }}" target="_blank">
+                                    {{ $history->new_referal->first_name }} {{ $history->new_referal->last_name }}
+                                  </a>
+                                  <br><small class="text-muted">{{ $history->new_referal_code }}</small>
+                                @else
+                                  <span class="text-muted">{{ $history->new_referal_code ?? 'N/A' }}</span>
+                                @endif
+                              </td>
+                              <td>{{ $history->reason ?? '-' }}</td>
+                              <td>{{ $history->created_at->format('d M Y, h:i A') }}</td>
+                            </tr>
+                            @empty
+                            <tr><td colspan="5" class="text-center">No history found.</td></tr>
+                            @endforelse
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                  </div>
+                  <!-- /.tab-pane change-upline -->
+
                 </div>
                 <!-- /.tab-content -->
               </div><!-- /.card-body -->
@@ -1693,6 +1819,74 @@
         var action = '';
         var token = "{{csrf_token()}}";
         
+        // Block user
+        $('.btn-block-user').on('click', function () {
+            var id = $(this).data('id');
+            var isBlocked = $(this).data('blocked');
+            var action = isBlocked ? 'unblock' : 'block';
+            var reason = '';
+            if (!isBlocked) {
+                reason = prompt('Enter reason for blocking this account (optional):') || '';
+            }
+            if (isBlocked || confirm('Are you sure you want to ' + action + ' this account?')) {
+                $.ajax({
+                    url: "{{url('toggle-block-user')}}",
+                    type: 'post',
+                    data: { _token: token, id: id, reason: reason },
+                    success: function (data) {
+                        var blocked = data.is_blocked;
+                        $('#block-badge')
+                            .removeClass('badge-success badge-danger')
+                            .addClass(blocked ? 'badge-danger' : 'badge-success')
+                            .text(blocked ? 'Blocked' : 'Active');
+                        var btn = $('.btn-block-user');
+                        btn.data('blocked', blocked ? 1 : 0)
+                           .removeClass('btn-danger btn-success')
+                           .addClass(blocked ? 'btn-success' : 'btn-danger')
+                           .html(blocked
+                               ? '<i class="fas fa-unlock"></i> Unblock'
+                               : '<i class="fas fa-ban"></i> Block Account');
+                        toastr.success('Account ' + (blocked ? 'blocked' : 'unblocked') + ' successfully');
+                    },
+                    error: function () { toastr.error('Action failed'); }
+                });
+            }
+        });
+
+        // Freeze wallet
+        $('.btn-freeze-wallet').on('click', function () {
+            var id = $(this).data('id');
+            var isFrozen = $(this).data('frozen');
+            var action = isFrozen ? 'unfreeze' : 'freeze';
+            var reason = '';
+            if (!isFrozen) {
+                reason = prompt('Enter reason for freezing this wallet (optional):') || '';
+            }
+            if (isFrozen || confirm('Are you sure you want to ' + action + ' this wallet?')) {
+                $.ajax({
+                    url: "{{url('toggle-freeze-wallet')}}",
+                    type: 'post',
+                    data: { _token: token, id: id, reason: reason },
+                    success: function (data) {
+                        var frozen = data.wallet_frozen;
+                        $('#freeze-badge')
+                            .removeClass('badge-success badge-warning')
+                            .addClass(frozen ? 'badge-warning' : 'badge-success')
+                            .text(frozen ? 'Frozen' : 'Active');
+                        var btn = $('.btn-freeze-wallet');
+                        btn.data('frozen', frozen ? 1 : 0)
+                           .removeClass('btn-warning btn-success')
+                           .addClass(frozen ? 'btn-success' : 'btn-warning')
+                           .html(frozen
+                               ? '<i class="fas fa-fire"></i> Unfreeze'
+                               : '<i class="fas fa-snowflake"></i> Freeze Wallet');
+                        toastr.success('Wallet ' + (frozen ? 'frozen' : 'unfrozen') + ' successfully');
+                    },
+                    error: function () { toastr.error('Action failed'); }
+                });
+            }
+        });
+
         $('.status').bootstrapSwitch('state');
         $('.status').on('switchChange.bootstrapSwitch',function () {
             var id = $(this).data('id');

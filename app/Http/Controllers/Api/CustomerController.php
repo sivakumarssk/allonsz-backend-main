@@ -96,13 +96,28 @@ class CustomerController extends Controller
             $user = User::where('phone',$request->phone)->first();
         }
         if($user){
+            if($user->is_blocked){
+                return response()->json([
+                    'error' => 'This account is blocked. Please contact support.'
+                ], 422);
+            }
             if($user->status == 'Active'){
                 return response()->json([
                     'error' => 'You are already registerd with us, Please login'
                 ],422);
             }
-            
         }else{
+            // Check if the email/phone belongs to a blocked user (even soft-deleted)
+            if($request->email){
+                $blocked = User::withTrashed()->where('email', $request->email)->where('is_blocked', true)->first();
+            }else{
+                $blocked = User::withTrashed()->where('phone', $request->phone)->where('is_blocked', true)->first();
+            }
+            if($blocked){
+                return response()->json([
+                    'error' => 'This account is blocked. Please contact support.'
+                ], 422);
+            }
             $user = new User();
         }
         
@@ -483,6 +498,11 @@ class CustomerController extends Controller
             $user = User::where('phone',$request->phone)->first();
         }
         if($user){
+            if($user->is_blocked){
+                return response()->json([
+                    'error' => 'Your account has been blocked. Please contact support.'
+                ], 422);
+            }
             if (Hash::check($request->password, $user->password) || $request->type == 'manual') {
                 $token = $user->createToken('MyApp')->accessToken;
                 $user->api_token = $token;
@@ -631,6 +651,27 @@ class CustomerController extends Controller
             }
         }
         $referal = User::where('referal_code',$request->referal_code)->first();
+
+        // Block joining under a blocked upline
+        if($referal->is_blocked){
+            return response()->json([
+                'error' => 'Invalid referral code. Please contact support.'
+            ], 422);
+        }
+
+        // Check blocked users by phone/email/aadhar/pan to prevent new account with same identity
+        if($request->phone){
+            $blocked_phone = User::withTrashed()->where('phone', $request->phone)->where('is_blocked', true)->where('id', '!=', $user->id)->first();
+            if($blocked_phone){
+                return response()->json(['error' => 'This phone number is not allowed. Please contact support.'], 422);
+            }
+        }
+        if($request->email){
+            $blocked_email = User::withTrashed()->where('email', $request->email)->where('is_blocked', true)->where('id', '!=', $user->id)->first();
+            if($blocked_email){
+                return response()->json(['error' => 'This email address is not allowed. Please contact support.'], 422);
+            }
+        }
 
         // Check if upline has any active package (regular or combo)
         $member = Member::where('user_id',$referal->id)->first();
@@ -898,50 +939,62 @@ class CustomerController extends Controller
     $setting = Setting::first();
     $user = Auth::User();
     $packages = collect();
-    
-    // Admin (user_id = 1) should see all packages without subscription
-    // Admin is the first person in all packages (regular and combo)
+
+    // Admin (user_id = 1) sees all packages
     if($user->id == 1){
         $packages = Package::all();
     } else {
-        $subscription = Member::where('user_id',$user->id)->first();
-        if($subscription){
-            // If user has subscription, get all packages (including combo)
-            $packages = Package::all();
-        } else {
-            // Check packages from upline
-            $upline = $user->referal;
-            $packageIds = collect();
-            
-            if($upline){
-                // Get regular packages from upline's circles
-                $memberIds = Member::where('user_id', $upline->id)
-                    ->selectRaw('MAX(id) as id')
-                    ->groupBy('package_id')
-                    ->pluck('id');
+        // Always show only packages the upline has purchased
+        // (regardless of whether current user already has a subscription)
+        $upline = $user->referal;
+        $packageIds = collect();
 
-                $circleds = Member::whereIn('id', $memberIds)
-                    ->where('user_id',$upline->id)
-                        ->orderBy('id', 'desc')
-                        ->pluck('circle_id');
+        if($upline){
+            // Get regular packages from upline's circles
+            $memberIds = Member::where('user_id', $upline->id)
+                ->selectRaw('MAX(id) as id')
+                ->groupBy('package_id')
+                ->pluck('id');
 
-                $circles = Circle::whereIn('id',$circleds)->with(['package','members'])->get();
-                $regularPackageIds = $circles->pluck('package_id')->unique()->values();
-                
-                // Get combo packages from upline's combo circles
-                $comboCircles = ComboCircle::where('user_id', $upline->id)
-                    ->where('status', 'Active')
-                    ->get();
-                
-                $comboPackageIds = $comboCircles->pluck('package_id')->unique()->values();
-                
-                // Merge regular package IDs with combo package IDs
-                $packageIds = $regularPackageIds->merge($comboPackageIds)->unique()->values();
-            }
+            $circleds = Member::whereIn('id', $memberIds)
+                ->where('user_id', $upline->id)
+                ->orderBy('id', 'desc')
+                ->pluck('circle_id');
 
-            if($packageIds->isNotEmpty()){
-                $packages = Package::whereIn('id',$packageIds)->get();
-            }
+            $circles = Circle::whereIn('id', $circleds)->with(['package','members'])->get();
+            $regularPackageIds = $circles->pluck('package_id')->unique()->values();
+
+            // Get combo packages from upline's combo circles
+            $comboCircles = ComboCircle::where('user_id', $upline->id)->get();
+            $comboPackageIds = $comboCircles->pluck('package_id')->unique()->values();
+
+            // Merge regular and combo package IDs
+            $packageIds = $regularPackageIds->merge($comboPackageIds)->unique()->values();
+        }
+
+        // Check 4-direct-downliner eligibility for upgrade packages
+        // Count how many direct downliners have purchased any package
+        $direct_downliners_with_package = User::where('referal_id', $user->id)
+            ->whereHas('subscriptions', function($q){ $q->where('status','Active'); })
+            ->orWhere(function($q) use ($user){
+                $q->where('referal_id', $user->id)
+                  ->whereHas('combo_circles');
+            })
+            ->count();
+
+        $user_subscriptions = Subscription::where('user_id', $user->id)->where('status','Active')->pluck('package_id');
+        $user_combo_packages = ComboCircle::where('user_id', $user->id)->pluck('package_id')->unique();
+        $already_purchased = $user_subscriptions->merge($user_combo_packages)->unique();
+
+        if($packageIds->isNotEmpty()){
+            $packages = Package::whereIn('id', $packageIds)->get()->filter(function($package) use ($already_purchased, $direct_downliners_with_package) {
+                // Already purchased packages are always shown (for display)
+                if($already_purchased->contains($package->id)){
+                    return true;
+                }
+                // Upgrade (new) packages require 4 direct downliners
+                return $direct_downliners_with_package >= 4;
+            })->values();
         }
     }
     
@@ -1308,6 +1361,13 @@ class CustomerController extends Controller
                 'error' => 'Package not found'
             ], 422);
         }
+        // Check if user is blocked
+        if($user->is_blocked){
+            return response()->json([
+                'error' => 'Your account has been blocked. Please contact support.'
+            ], 422);
+        }
+
         $subscription = Subscription::where('user_id',$user->id)->where('package_id',$package->id)->where('status','Active')->first();
         if($subscription){
             return response()->json([
@@ -1353,13 +1413,35 @@ class CustomerController extends Controller
             }
         }
 
+        // If this is an UPGRADE (user already has at least one package), require 4 direct downliners
+        if($user->id != 1){
+            $already_has_package = Subscription::where('user_id', $user->id)->where('status','Active')->exists()
+                || ComboCircle::where('user_id', $user->id)->exists();
+
+            if($already_has_package){
+                // Count direct downliners who have purchased any package (regular or combo)
+                $direct_downliners_count = User::where('referal_id', $user->id)
+                    ->where(function($q){
+                        $q->whereHas('subscriptions', function($sq){ $sq->where('status','Active'); })
+                          ->orWhereHas('combo_circles');
+                    })
+                    ->count();
+
+                if($direct_downliners_count < 4){
+                    return response()->json([
+                        'error' => 'You need at least 4 direct downliners who have purchased a package to upgrade'
+                    ], 422);
+                }
+            }
+        }
+
         $payment_type = $request->payment_type ?? 'razorpay'; // Default to razorpay if not specified
-        
+
         $setting = Setting::first();
         $sgst = (($setting->sgst * $package->price) / 100);
         $cgst = (($setting->cgst * $package->price) / 100);
         $total =  $sgst + $cgst + $package->price;
-        
+
         // Handle wallet payment
         if($payment_type === 'wallet') {
             // Calculate total available balance (withdrawable + non-withdrawable)
@@ -1726,7 +1808,7 @@ class CustomerController extends Controller
             $transaction = new Transaction();
             $transaction->user_id = $user->id;
             $transaction->type = 'Debit';
-            $transaction->reason = $package->name .' Package Purchased (Razorpay)';
+            $transaction->reason = $package->name .' Package Purchased';
             $transaction->amount = $total; // Total amount including GST
             $transaction->balance = $user->wallet; // Wallet balance remains unchanged
             $transaction->save();
@@ -1994,13 +2076,34 @@ class CustomerController extends Controller
         }
         
         $user = Auth::User();
-        
+
+        // Check wallet frozen
+        if($user->wallet_frozen){
+            return response()->json([
+                'error' => 'Your wallet is frozen. Please contact support.'
+            ], 422);
+        }
+
+        // Require at least 2 direct downliners who have purchased any package
+        $direct_downliners_count = User::where('referal_id', $user->id)
+            ->where(function($q){
+                $q->whereHas('subscriptions', function($sq){ $sq->where('status','Active'); })
+                  ->orWhereHas('combo_circles');
+            })
+            ->count();
+
+        if($direct_downliners_count < 2){
+            return response()->json([
+                'error' => 'You need at least 2 direct downliners who have purchased a package to withdraw'
+            ], 422);
+        }
+
         // Calculate available balance (wallet minus pending withdrawals)
         $pending_withdrawals = Withdraw::where('user_id', $user->id)
             ->where('status', 'Pending')
             ->sum('amount');
         $available_balance = $user->wallet - $pending_withdrawals;
-        
+
         if($available_balance < $request->amount){
             return response()->json([
                 'error' => 'Insufficient wallet balance'
@@ -2039,6 +2142,13 @@ class CustomerController extends Controller
         }
 
         $user = Auth::User();
+
+        // Check wallet frozen
+        if($user->wallet_frozen){
+            return response()->json([
+                'error' => 'Your wallet is frozen. Please contact support.'
+            ], 422);
+        }
 
         $combo_package_ids = Package::where('is_combo', true)->pluck('id');
         $direct_referrals_count = User::where('referal_id', $user->id)
@@ -5591,7 +5701,6 @@ $this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->us
                 $new_circle = $owner ? $owner->create_combo_circle($package->id, 'twentyone', 1, false) : null;
                 if($new_circle){
                     $this->combo_seed_twentyone_new_circle($new_circle, $first_position->user_id, $second_position->user_id, $third_position->user_id, $fourth_position->user_id, $fifth_position->user_id);
-                    $this->combo_debit_autorenew($owner, $package->combo_twentyone_autorenew_amount, 'Combo 21-Member Auto-Renew');
                 }
             }
             $this->combo_give_twentyone_reward($circle, 1, $package);
@@ -5605,7 +5714,6 @@ $this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->us
                 $new_circle = $owner ? $owner->create_combo_circle($package->id, 'twentyone', 1, false) : null;
                 if($new_circle){
                     $this->combo_seed_twentyone_new_circle($new_circle, $six_position->user_id, $seven_position->user_id, $eight_position->user_id, $nine_position->user_id, $ten_position->user_id);
-                    $this->combo_debit_autorenew($owner, $package->combo_twentyone_autorenew_amount, 'Combo 21-Member Auto-Renew');
                 }
             }
             $this->combo_give_twentyone_reward($circle, 2, $package);
@@ -5619,7 +5727,6 @@ $this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->us
                 $new_circle = $owner ? $owner->create_combo_circle($package->id, 'twentyone', 1, false) : null;
                 if($new_circle){
                     $this->combo_seed_twentyone_new_circle($new_circle, $fourteen_position->user_id, $thirteen_position->user_id, $twelve_position->user_id, $eleven_position->user_id, $fifteen_position->user_id);
-                    $this->combo_debit_autorenew($owner, $package->combo_twentyone_autorenew_amount, 'Combo 21-Member Auto-Renew');
                 }
             }
             $this->combo_give_twentyone_reward($circle, 3, $package);
@@ -5633,7 +5740,6 @@ $this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->us
                 $new_circle = $owner ? $owner->create_combo_circle($package->id, 'twentyone', 1, false) : null;
                 if($new_circle){
                     $this->combo_seed_twentyone_new_circle($new_circle, $nineteen_position->user_id, $eighteen_position->user_id, $seventeen_position->user_id, $sixteen_position->user_id, $twenty_position->user_id);
-                    $this->combo_debit_autorenew($owner, $package->combo_twentyone_autorenew_amount, 'Combo 21-Member Auto-Renew');
                 }
             }
             $this->combo_give_twentyone_reward($circle, 4, $package);
@@ -5720,39 +5826,48 @@ $this->create_transaction($circle->user_id, 'Credit', $total_reward, $circle->us
             $circle->user->save();
             $this->create_transaction($circle->user_id, 'Debit', $package->combo_twentyone_reward_amount, $circle->user->combo_wallet, $package->name.' Combo 21-Member Auto Purchase');
 
-            $upline_circle = $this->combo_find_upline_circle($circle->user, $package->id);
+            $renewing_user = $circle->user;
+
+            // 1. Try direct upline's circle
+            $upline_circle = $this->combo_find_upline_circle($renewing_user, $package->id);
             if ($upline_circle) {
-                $this->combo_fill_twentyone_directly($upline_circle->id, $package_id, $circle->user_id);
+                $this->combo_fill_twentyone_directly($upline_circle->id, $package_id, $renewing_user->id);
                 return;
             }
 
-            foreach ($circle->user->downlines as $downline) {
+            // 2. Try own direct downliners' circles
+            foreach ($renewing_user->downlines as $downline) {
                 $downline_circle = ComboCircle::where('package_id', $package->id)
                     ->where('section', 'twentyone')
                     ->where('user_id', $downline->id)
                     ->where('status', 'Active')
                     ->first();
-
                 if ($downline_circle) {
-                    $this->combo_fill_twentyone_directly($downline_circle->id, $package_id, $circle->user_id);
-                    return true;
+                    $this->combo_fill_twentyone_directly($downline_circle->id, $package_id, $renewing_user->id);
+                    return;
                 }
             }
 
-            $upline = $circle->user->referal;
-            if ($upline) {
-                foreach ($upline->downlines as $downline) {
+            // 3. Walk up upline chain, checking each upline's downliners
+            $current_upline = $renewing_user->referal;
+            $visited = [$renewing_user->id];
+            while ($current_upline) {
+                if (in_array($current_upline->id, $visited)) break;
+                $visited[] = $current_upline->id;
+
+                foreach ($current_upline->downlines as $downline) {
+                    if (in_array($downline->id, $visited)) continue;
                     $downline_circle = ComboCircle::where('package_id', $package->id)
                         ->where('section', 'twentyone')
                         ->where('user_id', $downline->id)
                         ->where('status', 'Active')
                         ->first();
-
                     if ($downline_circle) {
-                        $this->combo_fill_twentyone_directly($downline_circle->id, $package_id, $circle->user_id);
-                        return true;
+                        $this->combo_fill_twentyone_directly($downline_circle->id, $package_id, $renewing_user->id);
+                        return;
                     }
                 }
+                $current_upline = $current_upline->referal;
             }
         }
     }

@@ -1172,40 +1172,43 @@ class User extends Authenticatable
     
     public function update_new_circle_member($package_id,$user_id)
     {
-        // 1. first fill upline circle
         $user = User::find($user_id);
+
+        // 1. Check direct upline's circle first
         $referal = $user->referal;
         if($referal){
-            Log::info($user->username ." goes to referal - ".$referal->username." circle after comleting");
             $circle = Circle::where('package_id',$package_id)->where('user_id',$referal->id)->where('status','Active')->first();
             if($circle){
                 $user->update_circle_member($package_id,$user_id);
                 return;
             }
         }
-        // 2. if upline circle is completed same time( or means not empty place) check for downlines circle
-        $downlines = $user->downlines;
-        foreach($downlines as $downline){
-            Log::info($user->username ." goes to downline - ".$downline->username." circle after comleting");
+
+        // 2. Check own direct downliners' circles
+        foreach($user->downlines as $downline){
             $circle = Circle::where('package_id',$package_id)->where('user_id',$downline->id)->where('status','Active')->first();
             if($circle){
-                $user = User::where('referal_id',$downline->id)->first();
-                $user->update_circle_member($package_id,$user_id);
+                $downline->update_circle_member($package_id,$user_id);
                 return;
             }
         }
-        // 3. if downlines circles is not empty - check upline -> downlines circles
-        if($referal){
-            $downlines = $user->referal->downlines;
-            foreach($downlines as $downline){
-                Log::info($user->username ." goes to upline downline - ".$downline->username." circle after comleting");
+
+        // 3. Walk up the upline chain, checking each upline's downliners (level 1, 2, 3...)
+        $current_upline = $referal;
+        $visited = [$user_id];
+        while($current_upline){
+            if(in_array($current_upline->id, $visited)) break;
+            $visited[] = $current_upline->id;
+
+            foreach($current_upline->downlines as $downline){
+                if(in_array($downline->id, $visited)) continue;
                 $circle = Circle::where('package_id',$package_id)->where('user_id',$downline->id)->where('status','Active')->first();
                 if($circle){
-                    $user = User::where('referal_id',$downline->id)->first();
-                    $user->update_circle_member($package_id,$user_id);
+                    $downline->update_circle_member($package_id,$user_id);
                     return;
                 }
             }
+            $current_upline = $current_upline->referal;
         }
     }
     

@@ -74,9 +74,13 @@
                     <td>{{$user->phone}}</td>
                     <td>{{$user->referal_code}}</td>
                     <td>
-                        <!--<input type="checkbox" name="my-checkbox" class="status" data-id="{{$user->id}}" data-bootstrap-switch data-on-text="Active" -->
-                        <!--data-off-text="Inactive" {{$user->status == 'Active' ? 'checked' : ''}}>-->
                         {{$user->status}}
+                        @if($user->is_blocked)
+                            <span class="badge badge-danger ml-1">Blocked</span>
+                        @endif
+                        @if($user->wallet_frozen)
+                            <span class="badge badge-warning ml-1">Frozen</span>
+                        @endif
                     </td>
                     <td>
                       <a href="{{url('show-customer',$user->id)}}" target="_blank"  class="btn btn-sm btn-warning"><i class="fa fa-eye"></i></a>
