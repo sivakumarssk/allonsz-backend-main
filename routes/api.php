@@ -2,6 +2,7 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\CustomerController;
+use App\Http\Controllers\Api\KycDocumentController;
 use App\Http\Controllers\Api\VendorController;
 use App\Http\Controllers\TruthScreenController;
 
@@ -35,7 +36,9 @@ use App\Http\Controllers\TruthScreenController;
         
         Route::post('get-aadhar-validation-link', [TruthScreenController::class, 'get_aadhar_validation_link']);
         Route::post('validate-aadhar', [TruthScreenController::class, 'validate_aadhar']);
-        
+
+        Route::post('upload-kyc-documents', [KycDocumentController::class, 'store']);
+
         Route::middleware('setup')->group(function (){
             Route::get('user-status',[CustomerController::class,'user_status']);
             Route::post('profile',[CustomerController::class,'profile']);

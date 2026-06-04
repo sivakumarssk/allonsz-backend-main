@@ -30,4 +30,9 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    'truthscreen' => [
+        'ssl_verify' => env('TRUTHSCREEN_SSL_VERIFY', true),
+        'ca_bundle' => env('TRUTHSCREEN_CA_BUNDLE'),
+    ],
+
 ];

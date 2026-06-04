@@ -16,6 +16,7 @@ use Razorpay\Api\Api;
 
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Http\Client\ConnectionException;
 
 use \Hash;
 
@@ -24,6 +25,20 @@ class TruthScreenController extends Controller
     const API_URL = 'https://www.truthscreen.com/v1/apicall/nid/aadhar_get_otp';
     const CIPHER_METHOD = 'aes-128-cbc';
     const CIPHER_KEY_LEN = 16;
+
+    private function truthScreenHttpClient()
+    {
+        $verify = config('services.truthscreen.ssl_verify', true);
+        $caBundle = config('services.truthscreen.ca_bundle');
+
+        if ($caBundle && is_string($caBundle) && is_file($caBundle)) {
+            $verify = $caBundle;
+        }
+
+        return Http::withOptions([
+            'verify' => $verify,
+        ]);
+    }
 
     /**
      * Generate the encryption key from the token using SHA-512 hashing.
@@ -100,7 +115,7 @@ class TruthScreenController extends Controller
 
         // Step 4: Prepare and send the HTTP request
         $payload = ['requestData' => $encryptedData];
-        $response = Http::withHeaders([
+        $response = $this->truthScreenHttpClient()->withHeaders([
             'username' => $username,
             'Content-Type' => 'application/json',
         ])->post(self::API_URL, $payload);
@@ -187,7 +202,7 @@ class TruthScreenController extends Controller
 
         // Step 4: Prepare and send the HTTP request
         $payload = ['requestData' => $encryptedData];
-        $response = Http::withHeaders([
+        $response = $this->truthScreenHttpClient()->withHeaders([
             'username' => $username,
             'Content-Type' => 'application/json',
 ])->post('https://www.truthscreen.com/api/v1.0/eaadhaardigilocker/', $payload);
@@ -245,7 +260,7 @@ class TruthScreenController extends Controller
 
         // Step 4: Prepare and send the HTTP request
         $payload = ['requestData' => $encryptedData];
-        $response = Http::withHeaders([
+        $response = $this->truthScreenHttpClient()->withHeaders([
             'username' => $username,
             'Content-Type' => 'application/json',
         ])->post('https://www.truthscreen.com/api/v1.0/eaadhaardigilocker', $payload);
@@ -320,7 +335,7 @@ class TruthScreenController extends Controller
 
         // Step 4: Prepare and send the HTTP request
         $payload = ['requestData' => $encryptedData];
-        $response = Http::withHeaders([
+        $response = $this->truthScreenHttpClient()->withHeaders([
             'username' => $username,
             'Content-Type' => 'application/json',
         ])->post('https://www.truthscreen.com/v1/apicall/nid/aadhar_get_otp', $payload);
@@ -393,7 +408,7 @@ class TruthScreenController extends Controller
 
         // Step 4: Prepare and send the HTTP request
         $payload = ['requestData' => $encryptedData];
-        $response = Http::withHeaders([
+        $response = $this->truthScreenHttpClient()->withHeaders([
             'username' => $username,
             'Content-Type' => 'application/json',
         ])->post('https://www.truthscreen.com/v1/apicall/nid/aadhar_submit_otp', $payload);
@@ -569,7 +584,7 @@ class TruthScreenController extends Controller
 
         // Step 4: Prepare and send the HTTP request
         $payload = ['requestData' => $encryptedData];
-        $response = Http::withHeaders([
+        $response = $this->truthScreenHttpClient()->withHeaders([
             'username' => $username,
             'Content-Type' => 'application/json',
         ])->post('https://www.truthscreen.com/v1/apicall/nid/pan_online_verification', $payload);
@@ -663,19 +678,15 @@ class TruthScreenController extends Controller
             'ifsc_code.regex' => 'The IFSC code format is invalid.',
         ];
 
-        $validation = \Validator::make( $request->all(), $rules );
+        $validation = \Validator::make($request->all(), $rules, $messages);
         $error = $validation->errors()->first();
         if($error){
-            return response()->json([
-                'error' => $error
-            ],422);
+            return $this->bankErrorResponse('VALIDATION_ERROR', $error);
         }
         
         $user = User::where('id','!=',Auth::User()->id)->where('account_no',$request->account_no)->where('bank_status','Verified')->first();
         if($user){
-            return response()->json([
-                'error' => 'This account no is already taken'
-            ], 422);
+            return $this->bankErrorResponse('INVALID_ACCOUNT_NUMBER', 'This account number is already in use');
         }
         
         $user = Auth::User();
@@ -725,65 +736,130 @@ class TruthScreenController extends Controller
 
         // Step 4: Prepare and send the HTTP request
         $payload = ['requestData' => $encryptedData];
-        $response = Http::withHeaders([
-            'username' => $username,
-            'Content-Type' => 'application/json',
-        ])->post('https://www.truthscreen.com/BankIfscVerification/idsearch', $payload);
+        $requestId = $request->header('X-Request-Id', (string) Str::uuid());
+
+        try {
+            $response = $this->truthScreenHttpClient()
+                ->timeout(20)
+                ->withHeaders([
+                    'username' => $username,
+                    'Content-Type' => 'application/json',
+                ])->post('https://www.truthscreen.com/BankIfscVerification/idsearch', $payload);
+        } catch (ConnectionException $e) {
+            Log::warning('Bank verification provider timeout/unavailable', [
+                'user_id' => Auth::id(),
+                'request_id' => $requestId,
+                'provider' => 'truthscreen',
+                'error' => $e->getMessage(),
+            ]);
+
+            $message = Str::contains(strtolower($e->getMessage()), ['timed out', 'timeout'])
+                ? 'Bank verification timed out. Please try again.'
+                : 'Bank verification service is temporarily unavailable. Please try again.';
+
+            $code = Str::contains(strtolower($e->getMessage()), ['timed out', 'timeout'])
+                ? 'BANK_VERIFICATION_TIMEOUT'
+                : 'BANK_VERIFICATION_UNAVAILABLE';
+
+            Log::warning('Bank verification bypassed; persisting bank details without provider verification', [
+                'user_id' => Auth::id(),
+                'request_id' => $requestId,
+                'reason_code' => $code,
+            ]);
+
+            $this->markBankVerifiedWithFallback($user, $request, [
+                'verification_mode' => 'bypass_on_provider_error',
+                'provider' => 'truthscreen',
+                'provider_error' => $message,
+            ]);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Bank details saved successfully',
+                'data' => [
+                    'bank_status' => 'verified',
+                ],
+            ], 200);
+        } catch (\Throwable $e) {
+            Log::error('Bank verification provider exception', [
+                'user_id' => Auth::id(),
+                'request_id' => $requestId,
+                'provider' => 'truthscreen',
+                'error' => $e->getMessage(),
+            ]);
+
+            Log::warning('Bank verification bypassed; persisting bank details without provider verification', [
+                'user_id' => Auth::id(),
+                'request_id' => $requestId,
+                'reason_code' => 'BANK_VERIFICATION_FAILED',
+            ]);
+
+            $this->markBankVerifiedWithFallback($user, $request, [
+                'verification_mode' => 'bypass_on_provider_error',
+                'provider' => 'truthscreen',
+                'provider_error' => 'provider_exception',
+            ]);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Bank details saved successfully',
+                'data' => [
+                    'bank_status' => 'verified',
+                ],
+            ], 200);
+        }
 
         // Step 5: Handle the API response
-        $data = '';
         if ($response->successful()) {
             $responseData = $response->json('responseData');
-            $decryptedData = $this->decryptData($encryptionKey, $responseData);
-            $data = json_decode($decryptedData,true);
-            
-            // if(isset($data['status']) && $data['status'] == 0){
-            //     return response()->json([
-            //         'status' => 'error',
-            //         'message' => $data['msg']['status'],
-            //     ],422);
-            // }
-            
-            // if(isset($data['result']) && $data['result']['status'] == 0){
-            //     return response()->json([
-            //         'status' => 'error',
-            //         'message' => $data['result']['msg']['status'],
-            //     ],422);
-            // }
-            
+            if (!$responseData) {
+                Log::warning('Bank verification missing responseData', [
+                    'user_id' => Auth::id(),
+                    'request_id' => $requestId,
+                    'provider_status' => $response->status(),
+                    'provider_payload' => $response->json(),
+                ]);
+                return $this->bankErrorResponse(
+                    'BANK_VERIFICATION_FAILED',
+                    'We could not verify bank details at the moment. Please try again.'
+                );
+            }
+
+            try {
+                $decryptedData = $this->decryptData($encryptionKey, $responseData);
+                $data = json_decode($decryptedData,true);
+            } catch (\Throwable $e) {
+                Log::warning('Bank verification decrypt failed', [
+                    'user_id' => Auth::id(),
+                    'request_id' => $requestId,
+                    'provider_status' => $response->status(),
+                    'provider_payload' => $response->json(),
+                    'error' => $e->getMessage(),
+                ]);
+
+                return $this->bankErrorResponse(
+                    'BANK_VERIFICATION_FAILED',
+                    'We could not verify bank details at the moment. Please try again.'
+                );
+            }
+
+            if (!is_array($data)) {
+                Log::warning('Bank verification decoded payload not array', [
+                    'user_id' => Auth::id(),
+                    'request_id' => $requestId,
+                    'provider_status' => $response->status(),
+                    'provider_payload' => $response->json(),
+                ]);
+                return $this->bankErrorResponse(
+                    'BANK_VERIFICATION_FAILED',
+                    'We could not verify bank details at the moment. Please try again.'
+                );
+            }
+
             if(isset($data['status']) && $data['status'] == 1){
 
                 $aadhar_name = trim($aadharDetails[$firstKey]['msg'][0]['data']['name'] ?? '');
                 $bank_name = trim($data['msg']['Account Holder Name'] ?? '');
-
-                // Normalize name (Remove prefixes & sort words alphabetically)
-                function normalizeName($name) {
-                    $name = trim(str_ireplace(['Mr.', 'Mr', 'Ms.', 'Ms', 'Mrs.', 'Mrs'], '', $name)); // Remove titles
-                    $name = strtolower($name); // Convert to lowercase for case-insensitive matching
-                    $name_parts = explode(' ', $name);
-                    $name_parts = array_filter($name_parts); // Remove empty values
-                    sort($name_parts, SORT_STRING); // Sort words alphabetically
-                    return implode(' ', $name_parts);
-                }
-
-                // Check if one name is a subset of the other
-                function isNameMatching($aadhar_name, $bank_name) {
-                    $aadhar_parts = explode(' ', $aadhar_name);
-                    $bank_parts = explode(' ', $bank_name);
-
-                    // Check if all words of Aadhar name exist in the request name or vice versa
-                    return empty(array_diff($aadhar_parts, $bank_parts)) || empty(array_diff($bank_parts, $aadhar_parts));
-                }
-
-                $normalized_aadhar_name = normalizeName($aadhar_name);
-                $normalized_bank_name = normalizeName($bank_name);
-                // Check if either name or DOB matches
-                // if (!isNameMatching($normalized_aadhar_name, $normalized_bank_name)) {
-                //     return response()->json([
-                //         'status' => 'error',
-                //         'message' => 'Please use your own account number, Name or DOB NOT matching with Aadhar'
-                //     ], 422);
-                // }
                 $user->bank_details = $data;
                 $user->account_no = $request->account_no;
                 $user->bank_status = 'Verified';
@@ -794,37 +870,143 @@ class TruthScreenController extends Controller
     
                 return response()->json([
                     'status' => 'success',
-                    'data' => $data,
+                    'message' => 'Bank details verified successfully',
+                    'data' => [
+                        'bank_status' => 'verified',
+                    ],
                 ],200);
             }
+
+            $normalized = $this->normalizeBankVerificationFailure($data);
+            Log::warning('Bank verification business failure', [
+                'user_id' => Auth::id(),
+                'request_id' => $requestId,
+                'provider_status' => $response->status(),
+                'provider_payload' => $data,
+                'app_code' => $normalized['code'],
+            ]);
+            return $this->bankErrorResponse($normalized['code'], $normalized['message']);
         }
-        $user->bank_details = $data;
+
+        Log::warning('Bank verification non-success HTTP status', [
+            'user_id' => Auth::id(),
+            'request_id' => $requestId,
+            'provider_status' => $response->status(),
+            'provider_payload' => $response->json(),
+        ]);
+
+        if ($response->status() >= 500) {
+            Log::warning('Bank verification bypassed on provider 5xx; persisting bank details', [
+                'user_id' => Auth::id(),
+                'request_id' => $requestId,
+                'provider_status' => $response->status(),
+            ]);
+
+            $this->markBankVerifiedWithFallback($user, $request, [
+                'verification_mode' => 'bypass_on_provider_5xx',
+                'provider' => 'truthscreen',
+                'provider_status' => $response->status(),
+            ]);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Bank details saved successfully',
+                'data' => [
+                    'bank_status' => 'verified',
+                ],
+            ], 200);
+        }
+
+        $providerPayload = $response->json();
+        $encryptedResponseData = is_array($providerPayload) ? ($providerPayload['responseData'] ?? null) : null;
+        if (is_string($encryptedResponseData) && $encryptedResponseData !== '') {
+            try {
+                $decryptedData = $this->decryptData($encryptionKey, $encryptedResponseData);
+                $decoded = json_decode($decryptedData, true);
+                if (is_array($decoded)) {
+                    $normalized = $this->normalizeBankVerificationFailure($decoded);
+                    return $this->bankErrorResponse($normalized['code'], $normalized['message']);
+                }
+            } catch (\Throwable $e) {
+                Log::warning('Bank verification decrypt failed on non-success response', [
+                    'user_id' => Auth::id(),
+                    'request_id' => $requestId,
+                    'provider_status' => $response->status(),
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return $this->bankErrorResponse(
+            'BANK_VERIFICATION_FAILED',
+            'We could not verify bank details at the moment. Please try again.'
+        );
+    }
+
+    private function bankErrorResponse(string $code, string $message)
+    {
+        return response()->json([
+            'status' => 'error',
+            'code' => $code,
+            'message' => $message,
+        ], 422);
+    }
+
+    private function markBankVerifiedWithFallback(User $user, Request $request, array $details = []): void
+    {
+        $user->bank_details = $details;
         $user->account_no = $request->account_no;
         $user->bank_status = 'Verified';
-                
         $user->profile_status = 'Verified';
         $user->document_status = 'Verified';
         $user->save();
+    }
 
-        return response()->json([
-            'status' => 'success',
-            'data' => $data,
-        ],200);
-        
-        $responseData = $response->json('responseData');
-        
-        if($responseData){
-            $decryptedData = $this->decryptData($encryptionKey, $responseData);
-            return response()->json([
-                'status' => 'error',
-                'message' => json_decode($decryptedData, true),
-            ],422);
+    /**
+     * @param array<string, mixed> $payload
+     * @return array{code: string, message: string}
+     */
+    private function normalizeBankVerificationFailure(array $payload): array
+    {
+        $serialized = strtolower(json_encode($payload));
+
+        $contains = function (array $needles) use ($serialized): bool {
+            foreach ($needles as $needle) {
+                if (strpos($serialized, strtolower($needle)) !== false) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        if ($contains(['invalid ifsc', 'ifsc invalid', 'ifsc not found'])) {
+            return ['code' => 'INVALID_IFSC', 'message' => 'Invalid IFSC code'];
         }
 
-        return response()->json([
-            'status' => 'errorss',
-            'message' => json_decode($response->body(),true),
-        ], 422);
+        if ($contains(['invalid account', 'account number invalid', 'account does not exist'])) {
+            return ['code' => 'INVALID_ACCOUNT_NUMBER', 'message' => 'Invalid account number'];
+        }
+
+        if ($contains(['mismatch', 'account ifsc mismatch', 'ifsc does not match'])) {
+            return ['code' => 'ACCOUNT_IFSC_MISMATCH', 'message' => 'Account number and IFSC code do not match'];
+        }
+
+        if ($contains(['inactive', 'dormant', 'closed account', 'account not active'])) {
+            return ['code' => 'ACCOUNT_NOT_ACTIVE', 'message' => 'Bank account is not active'];
+        }
+
+        if ($contains(['timeout', 'timed out'])) {
+            return ['code' => 'BANK_VERIFICATION_TIMEOUT', 'message' => 'Bank verification timed out. Please try again.'];
+        }
+
+        if ($contains(['service unavailable', 'temporarily unavailable', 'gateway unavailable', 'bad gateway'])) {
+            return ['code' => 'BANK_VERIFICATION_UNAVAILABLE', 'message' => 'Bank verification service is temporarily unavailable. Please try again.'];
+        }
+
+        return [
+            'code' => 'BANK_VERIFICATION_FAILED',
+            'message' => 'We could not verify bank details at the moment. Please try again.',
+        ];
     }
     
     private function generateUniqueTransId()

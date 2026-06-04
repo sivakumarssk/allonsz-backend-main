@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Route;
 
 use App\Http\Controllers\Admin\AdminController;
+use App\Http\Controllers\Admin\KycController;
 use App\Http\Controllers\Admin\SettingController;
 use App\Http\Controllers\Admin\NotificationController;
 use App\Http\Controllers\Admin\SupportController;
@@ -60,6 +61,10 @@ Route::middleware('admin')->group(function () {
 	Route::post('/update-profile',[AdminController::class, 'update_profile']);
 	Route::post('/change-password',[AdminController::class, 'change_password']);
 	Route::get('/customers',[AdminController::class, 'customers']);
+	Route::get('/admin/kyc',[KycController::class, 'index']);
+	Route::get('/admin/kyc/{id}',[KycController::class, 'show'])->where('id', '[0-9]+');
+	Route::get('/admin/kyc/{id}/file/{field}',[KycController::class, 'file'])->where('id', '[0-9]+');
+	Route::get('/admin/kyc/{id}/download/{field}',[KycController::class, 'download'])->where('id', '[0-9]+');
 	Route::get('/show-customer/{id}',[AdminController::class, 'show_customer']);
 	Route::post('/store-user',[AdminController::class, 'store_user']);
 	Route::post('/delete-user',[AdminController::class, 'delete_user']);

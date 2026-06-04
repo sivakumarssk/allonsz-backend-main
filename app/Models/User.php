@@ -34,6 +34,11 @@ class User extends Authenticatable
     {
         return $this->hasMany('App\Models\Notification','from_id');
     }
+
+    public function kyc_document_submissions()
+    {
+        return $this->hasMany(KycDocumentSubmission::class);
+    }
     
     public function getNameAttribute()
     {

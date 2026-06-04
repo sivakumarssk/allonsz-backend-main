@@ -69,6 +69,8 @@ class CustomerController extends Controller
         return response()->json([
             'profile_status' => $user->profile_status,
             'document_status' => $user->document_status,
+            'kyc_status' => $user->kyc_status,
+            'email_document_status' => $user->email_document_status,
             'aadhar_status' => $user->aadhar_status,
             'pan_status' => $user->pan_status,
             'bank_status' => $user->bank_status,
@@ -975,7 +977,7 @@ class CustomerController extends Controller
         // Check 4-direct-downliner eligibility for upgrade packages
         // Count how many direct downliners have purchased any package
         $direct_downliners_with_package = User::where('referal_id', $user->id)
-            ->whereHas('subscriptions', function($q){ $q->where('status','Active'); })
+            ->whereHas('subscriptions', function($q){ $q->where('subscriptions.status','Active'); })
             ->orWhere(function($q) use ($user){
                 $q->where('referal_id', $user->id)
                   ->whereHas('combo_circles');
@@ -1422,7 +1424,7 @@ class CustomerController extends Controller
                 // Count direct downliners who have purchased any package (regular or combo)
                 $direct_downliners_count = User::where('referal_id', $user->id)
                     ->where(function($q){
-                        $q->whereHas('subscriptions', function($sq){ $sq->where('status','Active'); })
+                        $q->whereHas('subscriptions', function($sq){ $sq->where('subscriptions.status','Active'); })
                           ->orWhereHas('combo_circles');
                     })
                     ->count();
@@ -2087,7 +2089,7 @@ class CustomerController extends Controller
         // Require at least 2 direct downliners who have purchased any package
         $direct_downliners_count = User::where('referal_id', $user->id)
             ->where(function($q){
-                $q->whereHas('subscriptions', function($sq){ $sq->where('status','Active'); })
+                $q->whereHas('subscriptions', function($sq){ $sq->where('subscriptions.status','Active'); })
                   ->orWhereHas('combo_circles');
             })
             ->count();

@@ -214,6 +214,12 @@
             </a>
           </li>
           <li class="nav-item">
+            <a href="{{url('admin/kyc')}}" class="nav-link {{ request()->is('admin/kyc*') ? 'active' : '' }}">
+              <i class="nav-icon fas fa-id-card"></i>
+              <p>KYC Submissions</p>
+            </a>
+          </li>
+          <li class="nav-item">
             <a href="{{url('expiring-timers')}}" class="nav-link {{ request()->is('expiring-timers*') ? 'active' : '' }}">
               <i class="nav-icon fas fa-duotone fa-user"></i>
               <p>Expiring Timers</p>

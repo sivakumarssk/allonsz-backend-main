@@ -88,13 +88,13 @@ class SetupMiddleware
                 'redirect' => 'bank_screen',
             ], 422));
         }
-        // if($user->email_sent_document_status == 'Pending'){
-        //     abort(response()->json(
-        //     [
-        //         'error' => 'please send documents to company email',
-        //         'redirect' => 'email_document_screen',
-        //     ], 422));
-        // }
+        if($user->email_document_status == 'Pending'){
+            abort(response()->json(
+            [
+                'error' => 'email is not verified',
+                'redirect' => 'email_document_screen',
+            ], 422));
+        }
         if($user->status != 'Active'){
             abort(response()->json(
             [

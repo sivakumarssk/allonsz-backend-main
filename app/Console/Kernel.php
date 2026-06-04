@@ -18,6 +18,7 @@ class Kernel extends ConsoleKernel
         // $schedule->command('booking:end')->everyMinute()->evenInMaintenanceMode();
         // $schedule->command('pending:deposit')->daily()->evenInMaintenanceMode();
         // $schedule->command('coupon:expire')->daily()->evenInMaintenanceMode();
+        $schedule->command('kyc:retry-failed-emails')->everyTwoMinutes();
     }
 
     protected function commands()
